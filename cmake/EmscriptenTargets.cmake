@@ -44,3 +44,5 @@ set_target_properties(swipl-web PROPERTIES
 target_link_libraries(swipl-web libswipl)
 add_dependencies(swipl-web wasm_preload)
 
+# PL_next_solution() fails in wasm when compiled at -O0
+set_source_files_properties(pl-wam.c PROPERTIES COMPILE_FLAGS "$<$<CONFIG:Debug>:-O1>")

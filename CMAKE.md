@@ -190,16 +190,8 @@ sources. Adjust as necessary.
     mkdir build.wasm
     cd build.wasm
     source ~/emsdk/emsdk_env.sh
-    cmake -DCMAKE_TOOLCHAIN_FILE=$EMSCRIPTEN/cmake/Modules/Platform/Emscripten.cmake \
+    emcmake cmake \
           -DCMAKE_BUILD_TYPE=Release \
-          -DZLIB_LIBRARY=$HOME/zlib-1.2.11/libz.a \
-          -DZLIB_INCLUDE_DIR=$HOME/zlib-1.2.11 \
-          -DMULTI_THREADED=OFF \
-          -DUSE_SIGNALS=OFF \
-          -DUSE_GMP=OFF \
-          -DBUILD_SWIPL_LD=OFF \
-          -DSWIPL_PACKAGES=OFF \
-          -DINSTALL_DOCUMENTATION=OFF \
           -DSWIPL_NATIVE_FRIEND=build \
           -G Ninja ..
 
