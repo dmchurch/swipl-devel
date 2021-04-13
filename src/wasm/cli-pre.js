@@ -1,13 +1,36 @@
 Error.stackTraceLimit = 50;
 var isInitialized = false;
 var inStackTrace = false;
-Module.preInit = () => {
+Module.preInit = function() {
     ENV = process.env;
+    exit = process.exit; // avoid the "main thread called exit" message when multithreaded
+    NODEFS.flagsForNodeMap[65536] = fs.constants.O_DIRECTORY;
+    NODERAWFS.readdir = function() {return fs.readdirSync.apply(void 0, arguments)};
+    FS.readdir = _wrapNodeError(NODERAWFS.readdir);
+    SYSCALLS.getStreamFromFD = function(fd) {
+        var stream = FS.getStream(fd);
+        if (!stream) throw new FS.ErrnoError(8);
+        if ((stream.flags & 65536) && !stream.node && stream.path) {
+            const lookup = FS.lookupPath(stream.path);
+            if (!lookup) throw new FS.ErrnoError(8);
+            stream.node = {
+                ...lookup.node,
+                path: stream.path,
+            };
+        }
+        return stream;
+    };
+    FS.lookupNode = function(parent, name) {
+        if (parent.path) {
+            return FS.lookupPath(NODEJS_PATH.join(parent.path, name));
+        }
+        return VFS.lookupNode(parent, name);
+    };
 };
-Module.onRuntimeInitialized = () => {
+Module.onRuntimeInitialized = function() {
     isInitialized = true;
 }
-Module.extraStackTrace = () => {
+Module.extraStackTrace = function() {
     if (!isInitialized) return "";
     if (inStackTrace) return "(recursive call)\n";
     inStackTrace = true;

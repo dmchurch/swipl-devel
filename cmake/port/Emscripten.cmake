@@ -56,6 +56,56 @@ function(get_emscripten_cflags var)
     set(${var} "${target_cflags}" PARENT_SCOPE)
 endfunction()
 
+function(check_node_feature js_expression var)
+    if(DEFINED "HAVE_${var}")
+        return()
+    endif()
+    if(ARGN)
+        set(description "to use ${ARGN} in Node")
+    else()
+        set(description "for Node feature ${var}")
+    endif()
+    set(node_script "process.exit((${js_expression})?0:1)")
+    message(STATUS "Checking for flags required ${description}")
+    set(success 0)
+    foreach(node_opt "" "--wasm-staging" "--wasm-staging --experimental-wasm-threads" "--experimental-wasm-threads")
+        execute_process(COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} ${node_opt} -e "${node_script}"
+                        TIMEOUT 10
+                        RESULT_VARIABLE retval
+                        OUTPUT_VARIABLE output
+                        ERROR_VARIABLE output)
+        if(retval EQUAL 0)
+            set(success 1)
+            set(feature_opt "${node_opt}")
+            break()
+        endif()
+    endforeach()
+    if(success)
+        message(STATUS "Checking for flags required ${description} - ${feature_opt}")
+        set(${var} "${feature_opt}" CACHE INTERNAL "Node flags for feature ${var}")
+        set("HAVE_${var}" "1" CACHE INTERNAL "Have Node feature ${var}")
+        file(APPEND ${CMAKE_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/CMakeOutput.log
+            "Determining the flags to use ${var} in Node "
+            "passed with the following output:\n"
+            "${output}\n\n")
+    else()
+        message(STATUS "Checking for flags required ${description} - not found")
+        set("HAVE_${var}" "" CACHE INTERNAL "Have Node feature ${var}")
+        file(APPEND ${CMAKE_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/CMakeError.log
+            "Determining the flags to use ${var} in Node "
+            "failed with the following output:\n"
+            "${output}\n\n")
+    endif()
+endfunction()
+
+if(MULTI_THREADED AND NOT SWIPL_NATIVE_FRIEND)
+    check_node_feature("new WebAssembly.Memory({initial:1,maximum:1,shared:true}).buffer instanceof SharedArrayBuffer" NODE_WASM_THREADS "WebAssembly threads")
+    if (NOT HAVE_NODE_WASM_THREADS)
+        message(FATAL_ERROR "Error: Cannot build a multithreaded WASM implementation without a recent version of Node or the SWIPL_NATIVE_FRIEND option")
+    endif()
+    set(CMAKE_CROSSCOMPILING_EMULATOR_FLAGS ${CMAKE_CROSSCOMPILING_EMULATOR_FLAGS} ${NODE_WASM_THREADS})
+endif()
+
 # Setting this will bypass FindZLIB's check for the file's location
 set(ZLIB_LIBRARY -sUSE_ZLIB=1)
 
