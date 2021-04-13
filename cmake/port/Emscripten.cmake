@@ -13,7 +13,15 @@ set(SWIPL_SHARED_LIB OFF)
 set(USE_SIGNALS OFF)
 set(BUILD_SWIPL_LD OFF)
 set(INSTALL_DOCUMENTATION OFF)
-set(MULTI_THREADED OFF)
+# set(MULTI_THREADED OFF)
+
+if(MULTI_THREADED)
+# If multithreading is requested, make sure -pthread is passed for EVERY command line, since
+# it will have to build an entirely separate set of system libraries.
+add_compile_options(-pthread)
+add_link_options(-pthread)
+set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} -pthread")
+endif()
 
 # fsr this doesn't get included by emscripten
 list(APPEND CMAKE_FIND_ROOT_PATH "${EMSCRIPTEN_ROOT_PATH}/cache/sysroot")

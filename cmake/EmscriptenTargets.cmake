@@ -1,12 +1,23 @@
 # Make console binaries runnable through Node.js.
 
 set(WASM_NODE_LINK_FLAGS
+    --pre-js ${CMAKE_CURRENT_SOURCE_DIR}/wasm/cli-pre.js
+    -s EXPORTED_FUNCTIONS=_main,_PL_backtrace_string
     -s NODERAWFS=1
     -s EXIT_RUNTIME=1)
+if(MULTI_THREADED)
+list(APPEND WASM_NODE_LINK_FLAGS
+    -s ENVIRONMENT=node,worker
+    -s PTHREAD_POOL_SIZE=5)
+else()
+list(APPEND WASM_NODE_LINK_FLAGS
+    -s ENVIRONMENT=node)
+endif()
 join_list(WASM_NODE_LINK_FLAGS_STRING " " ${WASM_NODE_LINK_FLAGS})
 
 set_target_properties(swipl PROPERTIES
-		      LINK_FLAGS "${WASM_NODE_LINK_FLAGS_STRING}")
+		      LINK_FLAGS "${WASM_NODE_LINK_FLAGS_STRING}"
+              LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/wasm/cli-pre.js)
 
 # Create the preload data containing the libraries. Note that
 # alternatively we can put the library in the resource file and

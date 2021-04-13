@@ -459,7 +459,7 @@ struct PL_local_data
 #endif
     int		current;		/* currently processing signal */
     int		is_sync;		/* current signal is synchronous */
-#ifndef __unix__
+#if !defined(__unix__) && !defined(__EMSCRIPTEN__)
     int		forced;			/* Forced signal */
 #endif
 #ifdef O_C_STACK_GUARDED

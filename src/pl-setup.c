@@ -944,7 +944,7 @@ resetSignals(void)
     LD->signal.pending[i] = 0;
 }
 
-#if defined(O_PLMT) && defined(HAVE_PTHREAD_SIGMASK)
+#if defined(O_PLMT) && defined(HAVE_PTHREAD_SIGMASK) && !defined(__EMSCRIPTEN__)
 #ifndef HAVE_SIGPROCMASK
 #define HAVE_SIGPROCMASK 1
 #endif
