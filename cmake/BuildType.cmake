@@ -50,8 +50,10 @@ elseif(CMAKE_C_COMPILER_ID STREQUAL AppleClang)
   set(CMAKE_C_FLAGS_DEBUG "-DO_DEBUG -gdwarf-2 -g3"
       CACHE STRING "CFLAGS for a Debug build" FORCE)
 elseif(EMSCRIPTEN)
-  set(CMAKE_C_FLAGS_DEBUG "-DO_DEBUG -O0 -g3 -sASSERTIONS=1 -sSAFE_HEAP=1"
+  set(CMAKE_C_FLAGS_DEBUG "-DO_DEBUG -O0 -g3 -sASSERTIONS=1 -sSAFE_HEAP=1 -sDEFAULT_TO_CXX=0"
       CACHE STRING "CFLAGS for a Debug build" FORCE)
+  set(CMAKE_C_FLAGS_RELEASE "-O3 -sDEFAULT_TO_CXX=0"
+      CACHE STRING "CFLAGS for a Release build" FORCE)
 else()
   message("Unknown C compiler.  ${CMAKE_C_COMPILER_ID}")
 endif()
