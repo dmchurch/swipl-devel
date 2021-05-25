@@ -61,6 +61,7 @@ typedef struct
 #if VMCODE_IS_ADDRESS
   unsigned char   *_dewam_table;	/* decoding table */
   intptr_t	  _dewam_table_offset;	/* offset of 1st */
+  intptr_t	  _dewam_table_max;	/* offset of last */
   void  **_interpreter_jmp_table;	/* interpreters table */
 					/* must be last! (why?) */
   code    _wam_table[I_HIGHEST];	/* code --> address */
@@ -838,6 +839,7 @@ GLOBAL PL_local_data_t *PL_current_engine_ptr;
 #ifdef VMCODE_IS_ADDRESS
 #define dewam_table		(CD->_dewam_table)
 #define dewam_table_offset	(CD->_dewam_table_offset)
+#define dewam_table_max		(CD->_dewam_table_max)
 #define wam_table		(CD->_wam_table)
 #define interpreter_jmp_table	(CD->_interpreter_jmp_table)
 #endif /*VMCODE_IS_ADDRESS*/

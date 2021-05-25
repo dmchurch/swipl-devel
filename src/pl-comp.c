@@ -161,6 +161,7 @@ initWamTable(void)
       mincoded = wam_table[n];
   }
   dewam_table_offset = mincoded;
+  dewam_table_max = maxcoded;
 
   dewam_table = (unsigned char *)PL_malloc_atomic(((maxcoded-dewam_table_offset) + 1) *
 						  sizeof(char));
@@ -1193,18 +1194,36 @@ calculation at runtime.
 
 #define BLOCK(s) do { s; } while (0)
 
-static void Output_0(CompileInfo ci, vmi c);
+static void _Output_0(CompileInfo ci, vmi c);
 
-#define Output_a(ci,c)		addBuffer(&(ci)->codes, c, code)
-#define Output_an(ci,p,n)	addMultipleBuffer(&(ci)->codes, p, n, word)
-#define Output_1(ci,c,a)	BLOCK(Output_0(ci, c); \
-				      Output_a(ci, a))
-#define Output_2(ci,c,a0,a1)	BLOCK(Output_1(ci, c, a0); \
-				      Output_a(ci, a1))
-#define Output_3(ci,c,a0,a1,a2) BLOCK(Output_2(ci, c, a0, a1); \
-				      Output_a(ci, a2))
-#define Output_n(ci,c,p,n)	BLOCK(Output_0(ci, c); \
-				      Output_an(ci,p,n))
+#define Output_a(ci,c)		BLOCK(code _c = (c); \
+				      DPRINTF(MSG_COMP_TRACE, " %p", _c); \
+				      addBuffer(&(ci)->codes, _c, code))
+#define Output_an(ci,p,n)	BLOCK(Word _p = (Word)(p); \
+				      int _n = (n); \
+				      DEBUG(MSG_COMP_TRACE,\
+				        Sdprintf(" ["); \
+				        for(int i = 0; i < _n; i++) \
+				          Sdprintf(" %p", _p[i]); \
+				        Sdprintf("]"); \
+				      ); \
+				      addMultipleBuffer(&(ci)->codes, _p, _n, word))
+#define Output_1(ci,c,a)	BLOCK(_Output_0(ci, c); \
+				      Output_a(ci, a); \
+				      DPRINTF(MSG_COMP_TRACE, "\n"))
+#define Output_2(ci,c,a0,a1)	BLOCK(_Output_0(ci, c); \
+				      Output_a(ci, a0); \
+				      Output_a(ci, a1); \
+				      DPRINTF(MSG_COMP_TRACE, "\n"))
+#define Output_3(ci,c,a0,a1,a2) BLOCK(_Output_0(ci, c); \
+				      Output_a(ci, a0); \
+				      Output_a(ci, a1); \
+				      Output_a(ci, a2); \
+				      DPRINTF(MSG_COMP_TRACE, "\n"))
+#define Output_n(ci,c,p,n)	BLOCK(_Output_0(ci, c); \
+				      Output_an(ci,p,n); \
+				      DPRINTF(MSG_COMP_TRACE, "\n"))
+#define _Output_0(ci, c)	_Output_0(ci, c); DPRINTF(MSG_COMP_TRACE, "  %s", codeTable[c].name)
 
 #define PC(ci)		entriesBuffer(&(ci)->codes, code)
 #define OpCode(ci, pc)	(baseBuffer(&(ci)->codes, code)[pc])
@@ -1663,9 +1682,9 @@ mergeInstructions(CompileInfo ci, const vmi_merge *m, vmi c)
   return FALSE;
 }
 
-
+#undef _Output_0
 static void				/* inline is slower! */
-Output_0(CompileInfo ci, vmi c)
+_Output_0(CompileInfo ci, vmi c)
 { const vmi_merge *m;
 
   if ( (m=ci->mstate.candidates) )
@@ -1681,6 +1700,9 @@ Output_0(CompileInfo ci, vmi c)
 
   addBuffer(&(ci)->codes, encode(c), code);
 }
+
+#define _Output_0(ci, c)	_Output_0(ci, c); DPRINTF(MSG_COMP_TRACE, "  %3d: %s", ((ci)->codes.top - (ci)->codes.base) / sizeof(code), codeTable[c].name)
+#define Output_0(ci, c) 	BLOCK(_Output_0(ci, c); DPRINTF(MSG_COMP_TRACE, "\n"))
 
 
 		 /*******************************
@@ -1734,6 +1756,12 @@ compileClause(Clause *cp, Word head, Word body,
   Definition def = getProcDefinition(proc);
   int rc;
 
+	
+  DEBUG(MSG_COMP_TRACE,
+	int nchars = Sdprintf("%s:%s/%d: ", stringAtom(module->name), stringAtom(def->functor->name), (int)def->functor->arity);
+	Sdprintf("%*scompiling ", 30 - nchars, "");
+  );
+
   if ( head )
   { ci.islocal      = FALSE;
     ci.subclausearg = 0;
@@ -1747,6 +1775,14 @@ compileClause(Clause *cp, Word head, Word body,
 			)
 		      );
     clause.flags    = flags & (SSU_COMMIT_CLAUSE|SSU_CHOICE_CLAUSE);
+    DEBUG(MSG_COMP_TRACE,
+	Sdprintf("clause ");
+	PL_write_term(Serror, consTermRef(head), 1200, PL_WRT_QUOTED);
+	Sdprintf(" %s",
+		(flags & SSU_CHOICE_CLAUSE) ? "?=> " :
+		(flags & SSU_COMMIT_CLAUSE) ? "=> " :
+		":- ")
+    );
   } else
   { Word g = varFrameP(lTop, VAROFFSET(1));
 
@@ -1759,7 +1795,18 @@ compileClause(Clause *cp, Word head, Word body,
     ci.head_unify   = FALSE;
     clause.flags    = GOAL_CLAUSE;
     *g		    = *body;
+    DEBUG(MSG_COMP_TRACE,
+	Sdprintf("goal ");
+    );
   }
+
+  DEBUG(MSG_COMP_TRACE,
+	// if (body) PL_write_term(Serror, consTermRef(body), 1200, PL_WRT_QUOTED);
+	// else Sdprintf("with no body");
+	Sdprintf("\n");
+  );
+
+  DEBUG(MSG_COMP_TRACE, );
 
   clause.predicate  = def;
 
@@ -2379,6 +2426,7 @@ static int
 compileArgument(Word arg, int where, compileInfo *ci ARG_LD)
 { int index;
   bool first;
+  code vc;
 
   deRef(arg);
 
@@ -2502,11 +2550,12 @@ isvar:
     }
 
     first = isFirstVarSet(ci->used_var, index);
+    vc = -1;
 
     if ( index < ci->arity )		/* variable on its own in the head */
     { if ( where & A_BODY )
       { if ( where & A_ARG )
-	{ Output_0(ci, B_ARGVAR);
+	{ vc = B_ARGVAR;
 	} else
 	{ if ( argUnifiedTo(*arg PASS_LD) )
 	    set(ci->clause, CL_HEAD_TERMS);
@@ -2514,7 +2563,7 @@ isvar:
 	  { Output_0(ci, B_VAR0 + index);
 	    return TRUE;
 	  }
-	  Output_0(ci, B_VAR);
+	  vc = B_VAR;
 	}
       } else				/* head */
       { if ( !(where & A_ARG) && first )
@@ -2525,29 +2574,32 @@ isvar:
 	  Output_0(ci, H_VOID);
 	  return TRUE;
 	}
-	Output_0(ci, H_VAR);
+	vc = H_VAR;
       }
-      Output_a(ci, VAROFFSET(index));
+      assert(vc != -1);
+      Output_1(ci, vc, VAROFFSET(index));
 
       return TRUE;
     }
 
     /* normal variable (i.e. not shared in the head and non-void) */
+    vc = -1;
     if( where & A_BODY )
     { if ( where & A_ARG )
-      { Output_0(ci, first ? B_ARGFIRSTVAR : B_ARGVAR);
+      { vc = first ? B_ARGFIRSTVAR : B_ARGVAR;
       } else
       { if ( index < 3 && !first )
 	{ Output_0(ci, B_VAR0 + index);
 	  return TRUE;
 	}
-	Output_0(ci, first ? B_FIRSTVAR : B_VAR);
+	vc = first ? B_FIRSTVAR : B_VAR;
       }
     } else
-    { Output_0(ci, first ? H_FIRSTVAR : H_VAR);
+    { vc = first ? H_FIRSTVAR : H_VAR;
     }
 
-    Output_a(ci, VAROFFSET(index));
+    assert(vc != -1);
+    Output_1(ci, vc, VAROFFSET(index));
 
     return TRUE;
   }

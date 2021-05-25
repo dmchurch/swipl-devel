@@ -213,6 +213,7 @@ is also printed if stdio is not available.
 			  __orig_ld_debug.depth >= 0; \
 			  EXIT_DEBUG(n), __orig_ld_debug.depth = -1 )
 #define IF_DEBUGGING(n)	if (DEBUGGING(n)) WITH_DEBUG_FOR(n)
+#define DPRINTF(n, ...)	DEBUG(n, Sdprintf(__VA_ARGS__))
 
 /* We want to use the version of Sdprintf with the debug channel, if possible */
 #undef Sdprintf
@@ -226,6 +227,7 @@ int Sdprintf_ex(const char *channel, const char *file, int line, const char *fm,
 #define DEBUGGING(n) FALSE
 #define WITH_DEBUG_FOR(n) /* empty */
 #define IF_DEBUGGING(n) if (0)
+#define DPRINTF(...) ((void)0)
 #endif
 
 #if O_SECURE

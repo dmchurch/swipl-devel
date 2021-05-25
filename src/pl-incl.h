@@ -2335,9 +2335,12 @@ typedef struct redir_context
 						/* internal --> WAM */
 #define decode(c)   ((code) (dewam_table[(uintptr_t)(c) - \
 					 dewam_table_offset]))
+#define can_decode(c) ((uintptr_t)(c) >= dewam_table_offset && \
+		       (uintptr_t)(c) <= dewam_table_max)
 #else /* VMCODE_IS_ADDRESS */
 #define encode(wam) (wam)
 #define decode(wam) (wam)
+#define can_decode(c) TRUE
 #endif /* VMCODE_IS_ADDRESS */
 
 		/********************************

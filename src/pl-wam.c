@@ -215,7 +215,7 @@ DbgPrintInstruction(LocalFrame FR, Code PC)
   { GET_LD
 
     if ( ofr != FR )
-    { Sfprintf(Serror, "#%ld at [%ld] predicate %s\n",
+    { Sdprintf("#%ld at [%ld] predicate %s\n",
 	       loffset(FR),
 	       levelFrame(FR),
 	       predicateName(FR->predicate));
@@ -235,7 +235,9 @@ DbgPrintInstruction(LocalFrame FR, Code PC)
       } else
 	relto = NULL;
 
-      Sdprintf("\t%4ld %s\n", (long)(PC-relto), codeTable[decode(*PC)].name);
+      char buf[100];
+      const char *opname = can_decode(*PC) ? codeTable[decode(*PC)].name : (snprintf(buf,sizeof(buf),"<bad instruction %p>", (void*)*PC), buf);
+      Sdprintf("\t%4ld [%p] %s\n", (long)(PC-relto), PC, opname);
     }
   }
 }
