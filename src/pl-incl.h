@@ -1198,35 +1198,33 @@ assume
 	with n == 1 or n == 2.
 
 We assume the compiler will optimise this properly.
+
+Implementation has been moved to cpSizedData() in pl-inline.h, with
+the following signature:
+
+const void *cpSizedData(word **to, const void *from, int size)
+
+cpSizedData updates *to to point just after the last stored word, and
+it returns a pointer just after the last read word. So, the equivalent
+function prototypes of cpDoubleData and cpInt64Data would be (note
+the double indirection of the first argument):
+
+Word cpDoubleData(Word *to, Word from)
+Word cpInt64Data(Word *to, Word from)
+
+Previously, these were solely macro-based and updated their arguments
+automatically, so the equivalent prototypes were (using C++ syntax):
+
+void cpDoubleData(Word &to, Word &from)
+void cpInt64Data(Word &to, Word &from)
+
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #define cpDoubleData(to, from) \
-	{ Word _f = (Word)(from); \
-	  switch(WORDS_PER_DOUBLE) \
-	  { case 2: \
-	      *(to)++ = *_f++; \
-	    case 1: \
-	      *(to)++ = *_f++; \
-	      from = (void *)_f; \
-	      break; \
-	    default: \
-	      assert(0); \
-	  } \
-	}
+	(Word)cpSizedData((to), (from), WORDS_PER_DOUBLE)
 
 #define cpInt64Data(to, from) \
-	{ Word _f = (Word)(from); \
-	  switch(WORDS_PER_INT64) \
-	  { case 2: \
-	      *(to)++ = *_f++; \
-	    case 1: \
-	      *(to)++ = *_f++; \
-	      from = (void *)_f; \
-	      break; \
-	    default: \
-	      assert(0); \
-	  } \
-	}
+	(Word)cpSizedData((to), (from), WORDS_PER_INT64)
 
 /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 Structure declarations that must be shared across multiple files.

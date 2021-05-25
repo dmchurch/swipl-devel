@@ -547,7 +547,7 @@ VMI(H_INTEGER, 0, 1, (CA1_INTEGER))
 
     cvt.val = (int64_t)(intptr_t)*PC++;
     *p++ = mkIndHdr(WORDS_PER_INT64, TAG_INTEGER);
-    cpInt64Data(p, vp);
+    vp = cpInt64Data(&p, vp);
     *p = mkIndHdr(WORDS_PER_INT64, TAG_INTEGER);
 
     bindConst(k, c);
@@ -587,7 +587,7 @@ VMI(H_INT64, 0, WORDS_PER_INT64, (CA1_INT64))
     c = consPtr(p, TAG_INTEGER|STG_GLOBAL);
 
     *p++ = mkIndHdr(WORDS_PER_INT64, TAG_INTEGER);
-    cpInt64Data(p, PC);
+    PC = cpInt64Data(&p, PC);
     *p = mkIndHdr(WORDS_PER_INT64, TAG_INTEGER);
 
     bindConst(k, c);
@@ -632,7 +632,7 @@ VMI(H_FLOAT, 0, WORDS_PER_DOUBLE, (CA1_FLOAT))
     c = consPtr(p, TAG_FLOAT|STG_GLOBAL);
 
     *p++ = mkIndHdr(WORDS_PER_DOUBLE, TAG_FLOAT);
-    cpDoubleData(p, PC);
+    PC = cpDoubleData(&p, PC);
     *p++ = mkIndHdr(WORDS_PER_DOUBLE, TAG_FLOAT);
 
     bindConst(k, c);
@@ -1045,7 +1045,7 @@ VMI(B_INTEGER, 0, 1, (CA1_INTEGER))
   cvt.val = (int64_t)(intptr_t)*PC++;
   *ARGP++ = consPtr(p, TAG_INTEGER|STG_GLOBAL);
   *p++ = mkIndHdr(WORDS_PER_INT64, TAG_INTEGER);
-  cpInt64Data(p, vp);
+  vp = cpInt64Data(&p, vp);
   *p++ = mkIndHdr(WORDS_PER_INT64, TAG_INTEGER);
   NEXT_INSTRUCTION;
 }
@@ -1089,7 +1089,7 @@ VMI(B_FLOAT, 0, WORDS_PER_DOUBLE, (CA1_FLOAT))
 
   *ARGP++ = consPtr(p, TAG_FLOAT|STG_GLOBAL);
   *p++ = mkIndHdr(WORDS_PER_DOUBLE, TAG_FLOAT);
-  cpDoubleData(p, PC);
+  PC = cpDoubleData(&p, PC);
   *p++ = mkIndHdr(WORDS_PER_DOUBLE, TAG_FLOAT);
   NEXT_INSTRUCTION;
 }
@@ -3931,7 +3931,7 @@ VMI(A_INT64, 0, WORDS_PER_INT64, (CA1_INT64))
 { Number n = allocArithStack(PASS_LD1);
   Word p = &n->value.w[0];
 
-  cpInt64Data(p, PC);
+  PC = cpInt64Data(&p, PC);
   n->type    = V_INTEGER;
   NEXT_INSTRUCTION;
 }
@@ -4004,7 +4004,7 @@ VMI(A_DOUBLE, 0, WORDS_PER_DOUBLE, (CA1_FLOAT))
 { Number n = allocArithStack(PASS_LD1);
   Word p = &n->value.w[0];
 
-  cpDoubleData(p, PC);
+  PC = cpDoubleData(&p, PC);
   n->type       = V_FLOAT;
   NEXT_INSTRUCTION;
 }
@@ -6357,7 +6357,7 @@ VMI(T_INTEGER, 0, 1, (CA1_INTEGER))
 
     cvt.val = (int64_t)(intptr_t)*PC++;
     *p++ = mkIndHdr(WORDS_PER_INT64, TAG_INTEGER);
-    cpInt64Data(p, vp);
+    vp = cpInt64Data(&p, vp);
     *p = mkIndHdr(WORDS_PER_INT64, TAG_INTEGER);
 
     bindConst(k, c);
@@ -6391,7 +6391,7 @@ VMI(T_INT64, 0, WORDS_PER_INT64, (CA1_INT64))
     c = consPtr(p, TAG_INTEGER|STG_GLOBAL);
 
     *p++ = mkIndHdr(WORDS_PER_INT64, TAG_INTEGER);
-    cpInt64Data(p, PC);
+    PC = cpInt64Data(&p, PC);
     *p = mkIndHdr(WORDS_PER_INT64, TAG_INTEGER);
 
     bindConst(k, c);
@@ -6432,7 +6432,7 @@ VMI(T_FLOAT, 0, WORDS_PER_DOUBLE, (CA1_FLOAT))
     c = consPtr(p, TAG_FLOAT|STG_GLOBAL);
 
     *p++ = mkIndHdr(WORDS_PER_DOUBLE, TAG_FLOAT);
-    cpDoubleData(p, PC);
+    PC = cpDoubleData(&p, PC);
     *p++ = mkIndHdr(WORDS_PER_DOUBLE, TAG_FLOAT);
 
     bindConst(k, c);

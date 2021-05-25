@@ -3321,7 +3321,7 @@ compileArithArgument(Word arg, compileInfo *ci ARG_LD)
 	  } cvt;
 	  Word vp = cvt.w;
 
-	  cpInt64Data(vp, p);
+	  p = cpInt64Data(&vp, p);
 
 	  if ( cvt.val >= LONG_MIN && cvt.val <= LONG_MAX )
 	  { Output_1(ci, A_INTEGER, (word)cvt.val);
@@ -5185,7 +5185,7 @@ decompile_head(Clause clause, term_t head, decompileInfo *di ARG_LD)
 	  if ( p )
 	  { w = consPtr(p, TAG_INTEGER|STG_GLOBAL);
 	    *p++ = mkIndHdr(WORDS_PER_INT64, TAG_INTEGER);
-	    cpInt64Data(p, PC);
+	    PC = cpInt64Data(&p, PC);
 	    *p   = mkIndHdr(WORDS_PER_INT64, TAG_INTEGER);
 	    TRY(_PL_unify_atomic(argp, w));
 	    break;
@@ -5199,7 +5199,7 @@ decompile_head(Clause clause, term_t head, decompileInfo *di ARG_LD)
 	  if ( p )
 	  { w = consPtr(p, TAG_FLOAT|STG_GLOBAL);
 	    *p++ = mkIndHdr(WORDS_PER_DOUBLE, TAG_FLOAT);
-	    cpDoubleData(p, PC);
+	    PC = cpDoubleData(&p, PC);
 	    *p   = mkIndHdr(WORDS_PER_DOUBLE, TAG_FLOAT);
 	    TRY(_PL_unify_atomic(argp, w));
 	    break;
@@ -5592,7 +5592,7 @@ decompileBodyNoShift(decompileInfo *di, code end, Code until ARG_LD)
 
 			    *ARGP++ = consPtr(p, TAG_INTEGER|STG_GLOBAL);
 			    *p++ = mkIndHdr(WORDS_PER_INT64, TAG_INTEGER);
-			    cpInt64Data(p, PC);
+			    PC = cpInt64Data(&p, PC);
 			    *p   = mkIndHdr(WORDS_PER_INT64, TAG_INTEGER);
 			    continue;
 			  }
@@ -5609,7 +5609,7 @@ decompileBodyNoShift(decompileInfo *di, code end, Code until ARG_LD)
 
 			    *ARGP++ = consPtr(p, TAG_FLOAT|STG_GLOBAL);
 			    *p++ = mkIndHdr(WORDS_PER_DOUBLE, TAG_FLOAT);
-			    cpDoubleData(p, PC);
+			    PC = cpDoubleData(&p, PC);
 			    *p   = mkIndHdr(WORDS_PER_DOUBLE, TAG_FLOAT);
 			    continue;
 			  }
@@ -7050,7 +7050,7 @@ unify_vmi(term_t t, Code bp)
 	  } v;
 	  Word f = v.w;
 
-	  cpDoubleData(f, bp);
+	  bp = cpDoubleData(&f, bp);
 	  rc = PL_put_float(av+an, v.d);
 	  break;
 	}
@@ -7058,7 +7058,7 @@ unify_vmi(term_t t, Code bp)
 	{ int64_t i;
 	  Word dp = (Word)&i;
 
-	  cpInt64Data(dp, bp);
+	  bp = cpInt64Data(&dp, bp);
 	  rc = PL_put_int64(av+an, i);
 	  break;
 	}

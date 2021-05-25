@@ -385,6 +385,21 @@ same_type_numbers(Number n1, Number n2)
   return make_same_type_numbers(n1, n2);
 }
 
+
+static inline const void *
+cpSizedData(word **to, const void *from, int size)
+{ Word _f = (Word)(from);
+  switch(size)
+  { case 2:
+      *(*to)++ = *_f++;
+    case 1:
+      *(*to)++ = *_f++;
+      return _f;
+    default:
+      assert(0);
+  }
+}
+
 /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 Mark() sets LD->mark_bar, indicating  that   any  assignment  above this
 value need not be trailed.

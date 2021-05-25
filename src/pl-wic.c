@@ -2627,7 +2627,7 @@ saveWicClause(wic_state *state, Clause clause)
 #if SIZEOF_VOIDP == 4
 	case H_INT64:
 	{ Word p = (Word)&v;
-	  cpInt64Data(p, bp);
+	  bp = cpInt64Data(&p, bp);
 	  goto vh_int;
 	}
 #endif
@@ -2646,7 +2646,7 @@ saveWicClause(wic_state *state, Clause clause)
 #if SIZEOF_VOIDP == 4
 	case B_INT64:
 	{ Word p = (Word)&v;
-	  cpInt64Data(p, bp);
+	  bp = cpInt64Data(&p, bp);
 	  goto vb_int;
 	}
 #endif
@@ -2662,7 +2662,7 @@ saveWicClause(wic_state *state, Clause clause)
 #if SIZEOF_VOIDP == 4
 	case A_INT64:
 	{ Word p = (Word)&v;
-	  cpInt64Data(p, bp);
+	  bp = cpInt64Data(&p, bp);
 	  goto va_int;
 	}
 #endif
@@ -2728,7 +2728,7 @@ saveWicClause(wic_state *state, Clause clause)
 	{ int64_t val;
 	  Word p = (Word)&val;
 
-	  cpInt64Data(p, bp);
+	  bp = cpInt64Data(&p, bp);
 	  putInt64(val, fd);
 	  break;
 	}
@@ -2738,7 +2738,7 @@ saveWicClause(wic_state *state, Clause clause)
 	    double f;
 	  } v;
 	  Word p = v.w;
-	  cpDoubleData(p, bp);
+	  bp = cpDoubleData(&p, bp);
 	  putFloat(v.f, fd);
 	  break;
 	}
