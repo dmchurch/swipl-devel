@@ -195,28 +195,29 @@ load_vmis(const char *file)
 	const char *e3 = skip_flags(s3);
 	const char *s4 = skip_over(skip_ws(skip_over(e3, ',')), '(');
 	const char *e4 = skip_over(s4, ')');
-	const char *s5 = is_vmh ? skip_over(skip_ws(skip_over(e4, ',')), '(') : NULL;
-	const char *e5 = is_vmh ? skip_over(s5, ')') : NULL;
+	const char *s5 = skip_over(skip_ws(skip_over(e4, ',')), '(');
+	const char *e5 = skip_over(s5, ')');
 
-	if ( !e4 || (is_vmh && !e5) )
+	if ( !e5 )
 	{ fprintf(stderr, "Syntax error at %s:%d\n", file, line);
 	  exit(1);
 	} else
 	{ e4--;				/* backspace over ) */
-	  e5 -= is_vmh;
+	  e5--;
 	}
 
 	vmi_list[vmi_count].name  = my_strndup(s1, e1-s1);
 	vmi_list[vmi_count].flags = is_vmh ? NULL : my_strndup(s2, e2-s2);
 	vmi_list[vmi_count].argc  = my_strndup(s3, e3-s3);
 	vmi_list[vmi_count].args  = my_strndup(s4, e4-s4);
-	vmi_list[vmi_count].argn  = is_vmh ? my_strndup(s5, e5-s5) : NULL;
+	vmi_list[vmi_count].argn  = my_strndup(s5, e5-s5);
 	vmi_list[vmi_count].is_vmh = is_vmh;
 
 	if (!is_vmh)			/* VMH pseudo-instructions aren't part of signature */
 	{ add_synopsis(s1, e1-s1);	/* flags (s2) isn't needed for VM signature */
 	  add_synopsis(s3, e3-s3);
 	  add_synopsis(s4, e4-s4);
+	  /* argument names (s5) aren't needed for VM signature */
 	}
 
 	vmi_count++;
@@ -328,15 +329,15 @@ emit_vmi_hdr(const char *to)
 
     if (Vmi->is_vmh)
     { fprintf(out, "#define VMHDECL_%s     %s, %s, (%s), (%s)\n", Vmi->name, Vmi->name, Vmi->argc, Vmi->args, Vmi->argn);
-      fprintf(out, "#define VMHARGNAMES_%s %s\n", Vmi->name, Vmi->argn);
     }
     else
-    { fprintf(out, "#define VMIDECL_%s     %s, %s, %s, (%s)\n", Vmi->name, Vmi->name, Vmi->flags, Vmi->argc, Vmi->args);
+    { fprintf(out, "#define VMIDECL_%s     %s, %s, %s, (%s), (%s)\n", Vmi->name, Vmi->name, Vmi->flags, Vmi->argc, Vmi->args, Vmi->argn);
       fprintf(out, "#define VMIFLAGS_%s    %s\n", Vmi->name, Vmi->flags);
     }
     
     fprintf(out, "#define VM%cARGCOUNT_%s %s\n", Vmi->is_vmh ? 'H' : 'I', Vmi->name, Vmi->argc);
     fprintf(out, "#define VM%cARGTYPES_%s %s\n\n", Vmi->is_vmh ? 'H' : 'I', Vmi->name, Vmi->args);
+    fprintf(out, "#define VM%cARGNAMES_%s %s\n\n", Vmi->is_vmh ? 'H' : 'I', Vmi->name, Vmi->argn);
   }
 
   fclose(out);

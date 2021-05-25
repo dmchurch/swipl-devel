@@ -25,7 +25,11 @@
 #define A_ARG0(a0,...)			a0
 #define A_ARG1(a0,a1,...)		a1
 #define A_ARG2(a0,a1,a2,...)		a2
+#define A_ARG9(a0,a1,a2,a3,a4,a5,a6,a7,a8,a9,...) a9
 #define A_SHIFT1(a0, ...)		__VA_ARGS__
+#define __A_COUNT(...)			A_ARG9(__VA_ARGS__)
+#define _A_COUNT(...)			__A_COUNT(A_SHIFT1(~, ## __VA_ARGS__, 9,8,7,6,5,4,3,2,1,0))
+#define A_COUNT(...)			_A_COUNT(__VA_ARGS__)
 #define A_CALL(f,...)			f(__VA_ARGS__)
 #define A_ECHO(...)			__VA_ARGS__
 #define A_UNWRAP(list)			A_ECHO list

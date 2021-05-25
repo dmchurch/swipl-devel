@@ -42,7 +42,7 @@ Each VMI has the structure below. Using this structure we are completely
 flexible in how we implement the instruction   and  we can easily create
 the derived tables, which is done by the program mkvmi.c.
 
-	VMI(Name, Flags, #Args, (ArgType, ...))
+	VMI(Name, Flags, #Args, (ArgType, ...), (ArgName, ...))
 	{
 	}
 	END_VMI
@@ -99,9 +99,10 @@ Virtual machine instructions can return with one of:
 	* FRAME_FAILED
 	Other failures: deep backtracking.
 
-	* VMI_GOTO(VMI)
+	* VMI_GOTO(VMI, passarg...)
 	Continue executing another virtual instruction.  Note this is
-	called GOTO as it is a jump rather than a call.
+	called GOTO as it is a jump rather than a call. passarg's must be
+	arguments declared in the VMI() header.
 
 	* VMH_GOTO(VMH, arg...)
 	Continue executing a "helper instruction", using the given arguments.
@@ -150,8 +151,8 @@ Virtual machine instruction names.  Prefixes:
 	  } \
 	}
 
-#define IF_WRITE_MODE_GOTO(label) \
-	if ( UMODE == uwrite ) VMI_GOTO(label)
+#define IF_WRITE_MODE_GOTO(...) \
+	if ( UMODE == uwrite ) VMI_GOTO(__VA_ARGS__)
 
 #define TRUST_CLAUSE(cref) \
 	UMODE = uread; \
@@ -232,6 +233,10 @@ END_VMH
 	  onchange;					\
 	}
 
+/* Reserve n cells for n args, restoring locations if stack shifts */
+#define ENSURE_GLOBAL_SPACE_FOR_VARS(...) \
+	ENSURE_GLOBAL_SPACE(A_COUNT(__VA_ARGS__), RESTORE_VARS(__VA_ARGS__))
+
 /* Can be used for debugging to always force GC at a place */
 #define FAKE_GC(onchange) \
 	{ int __rc;					\
@@ -275,7 +280,7 @@ We simply switch to trace-mode, which will   trap the tracer on the next
 breakable instruction (which is what D_BREAK is supposed to replace).
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(D_BREAK, 0, 0, ())
+VMI(D_BREAK, 0, 0, (), ())
 { code c = replacedBreak(PC-1);
   break_action a;
   int pop;				/* arithmetic stack to pop */
@@ -432,7 +437,7 @@ END_VMH
 I_NOP
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(I_NOP, 0, 0, ())
+VMI(I_NOP, 0, 0, (), ())
 { NEXT_INSTRUCTION;
 }
 END_VMI
@@ -449,11 +454,9 @@ mark atoms if AGC is in progress because the AGC marker may already have
 visited our stack.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(H_ATOM, 0, 1, (CA1_DATA))
-{ word c;
-  IF_WRITE_MODE_GOTO(B_ATOM);
+VMI(H_ATOM, 0, 1, (CA1_DATA), (c))
+{ IF_WRITE_MODE_GOTO(B_ATOM, c);
 
-  c = (word)*PC++;
   pushVolatileAtom(c);
   VMH_GOTO(h_const, c);
 }
@@ -466,10 +469,10 @@ points to the current argument to  be   matched.  ARGP is derefenced and
 unified with a constant argument.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(H_SMALLINT, 0, 1, (CA1_DATA))
-{ IF_WRITE_MODE_GOTO(B_SMALLINT);
+VMI(H_SMALLINT, 0, 1, (CA1_DATA), (c))
+{ IF_WRITE_MODE_GOTO(B_SMALLINT, c);
 
-  VMH_GOTO(h_const, (word)*PC++);
+  VMH_GOTO(h_const, c);
 }
 END_VMI
 
@@ -495,7 +498,7 @@ END_VMH
 H_NIL is used for [] in the head.  See H_ATOM for details.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(H_NIL, 0, 0, ())
+VMI(H_NIL, 0, 0, (), ())
 { word c;
   Word k;
 
@@ -524,10 +527,10 @@ handled through H_SMALLINT. Copy to the  global stack if the argument is
 variable, compare the numbers otherwise.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(H_INTEGER, 0, 1, (CA1_INTEGER))
+VMI(H_INTEGER, 0, 1, (CA1_INTEGER), (iarg))
 { Word k;
 
-  IF_WRITE_MODE_GOTO(B_INTEGER);
+  IF_WRITE_MODE_GOTO(B_INTEGER, iarg);
 
   deRef2(ARGP, k);
   if ( canBind(*k) )
@@ -537,7 +540,6 @@ VMI(H_INTEGER, 0, 1, (CA1_INTEGER))
     { int64_t val;
       word w[WORDS_PER_INT64];
     } cvt;
-    Word vp = cvt.w;
 
     ENSURE_GLOBAL_SPACE(2+WORDS_PER_INT64, deRef2(ARGP, k));
 
@@ -545,15 +547,15 @@ VMI(H_INTEGER, 0, 1, (CA1_INTEGER))
     gTop += 2+WORDS_PER_INT64;
     c = consPtr(p, TAG_INTEGER|STG_GLOBAL);
 
-    cvt.val = (int64_t)(intptr_t)*PC++;
+    cvt.val = (int64_t)iarg;
     *p++ = mkIndHdr(WORDS_PER_INT64, TAG_INTEGER);
-    vp = cpInt64Data(&p, vp);
+    cpInt64Data(&p, cvt.w);
     *p = mkIndHdr(WORDS_PER_INT64, TAG_INTEGER);
 
     bindConst(k, c);
     ARGP++;
     NEXT_INSTRUCTION;
-  } else if ( isBignum(*k) && valBignum(*k) == (intptr_t)*PC++ )
+  } else if ( isBignum(*k) && valBignum(*k) == iarg )
   { ARGP++;
     NEXT_INSTRUCTION;
   }
@@ -570,10 +572,10 @@ as this is the same as H_INTEGER on 64-bit hardware.
 TBD: Compile conditionally
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(H_INT64, 0, WORDS_PER_INT64, (CA1_INT64))
+VMI(H_INT64, 0, WORDS_PER_INT64, (CA1_INT64), (i64ptr))
 { Word k;
 
-  IF_WRITE_MODE_GOTO(B_INT64);
+  IF_WRITE_MODE_GOTO(B_INT64, i64ptr);
 
   deRef2(ARGP, k);
   if ( canBind(*k) )
@@ -587,7 +589,7 @@ VMI(H_INT64, 0, WORDS_PER_INT64, (CA1_INT64))
     c = consPtr(p, TAG_INTEGER|STG_GLOBAL);
 
     *p++ = mkIndHdr(WORDS_PER_INT64, TAG_INTEGER);
-    PC = cpInt64Data(&p, PC);
+    cpInt64Data(&p, i64ptr);
     *p = mkIndHdr(WORDS_PER_INT64, TAG_INTEGER);
 
     bindConst(k, c);
@@ -598,7 +600,7 @@ VMI(H_INT64, 0, WORDS_PER_INT64, (CA1_INT64))
     size_t i;
 
     for(i=0; i<WORDS_PER_INT64; i++)
-    { if ( *vk++ != (word)*PC++ )
+    { if ( *vk++ != *i64ptr++ )
 	CLAUSE_FAILED;
     }
     ARGP++;
@@ -615,10 +617,10 @@ H_FLOAT: Float in the head. The  float   follows  the instruction and is
 represented as a native C-double.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(H_FLOAT, 0, WORDS_PER_DOUBLE, (CA1_FLOAT))
+VMI(H_FLOAT, 0, WORDS_PER_DOUBLE, (CA1_FLOAT), (fptr))
 { Word k;
 
-  IF_WRITE_MODE_GOTO(B_FLOAT);
+  IF_WRITE_MODE_GOTO(B_FLOAT, fptr);
 
   deRef2(ARGP, k);
   if ( canBind(*k) )
@@ -632,7 +634,7 @@ VMI(H_FLOAT, 0, WORDS_PER_DOUBLE, (CA1_FLOAT))
     c = consPtr(p, TAG_FLOAT|STG_GLOBAL);
 
     *p++ = mkIndHdr(WORDS_PER_DOUBLE, TAG_FLOAT);
-    PC = cpDoubleData(&p, PC);
+    cpDoubleData(&p, fptr);
     *p++ = mkIndHdr(WORDS_PER_DOUBLE, TAG_FLOAT);
 
     bindConst(k, c);
@@ -643,10 +645,10 @@ VMI(H_FLOAT, 0, WORDS_PER_DOUBLE, (CA1_FLOAT))
 
     switch(WORDS_PER_DOUBLE) /* depend on compiler to clean up */
     { case 2:
-	if ( *p++ != *PC++ )
+	if ( *p++ != *fptr++ )
 	  CLAUSE_FAILED;
       case 1:
-	if ( *p++ == *PC++ )
+	if ( *p++ == *fptr++ )
 	{ ARGP++;
 	  NEXT_INSTRUCTION;
 	}
@@ -670,39 +672,37 @@ have two instructions.
 TBD:	Deal with multiple identical instructions
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(H_MPZ, 0, VM_DYNARGC, (CA1_MPZ))
+VMI(H_MPZ, 0, VM_DYNARGC, (CA1_MPZ), (mpzarg))
 { SEPARATE_VMI;
-  VMI_GOTO(H_STRING);
+  VMI_GOTO(H_STRING, mpzarg);
 }
 END_VMI
 
-VMI(H_MPQ, 0, VM_DYNARGC, (CA1_MPQ))
+VMI(H_MPQ, 0, VM_DYNARGC, (CA1_MPQ), (mpqarg))
 { SEPARATE_VMI;
-  VMI_GOTO(H_STRING);
+  VMI_GOTO(H_STRING, mpqarg);
 }
 END_VMI
 
-VMI(H_STRING, 0, VM_DYNARGC, (CA1_STRING))
+VMI(H_STRING, 0, VM_DYNARGC, (CA1_STRING), (strarg))
 { Word k;
 
-  IF_WRITE_MODE_GOTO(B_STRING);
+  IF_WRITE_MODE_GOTO(B_STRING, strarg);
 
   deRef2(ARGP, k);
   if ( canBind(*k) )
-  { size_t sz = gsizeIndirectFromCode(PC);
+  { size_t sz = gsizeIndirectFromCode(strarg);
 
     ENSURE_GLOBAL_SPACE(sz, deRef2(ARGP, k));
-    struct word_and_Code retval = VM_globalIndirectFromCode(PC PASS_LD);
-    PC = retval.code;
+    struct word_and_Code retval = VM_globalIndirectFromCode(strarg PASS_LD);
     bindConst(k, retval.word);
     ARGP++;
     NEXT_INSTRUCTION;
   }
   if ( isIndirect(*k) )
-  { struct word_and_Code retval = VM_equalIndirectFromCode(*k, PC PASS_LD);
+  { struct word_and_Code retval = VM_equalIndirectFromCode(*k, strarg PASS_LD);
     if ( retval.word )
-    { PC = retval.code;
-      ARGP++;
+    { ARGP++;
       NEXT_INSTRUCTION;
     }
   }
@@ -719,15 +719,15 @@ compiler suppresses H_VOID when there are   no other instructions before
 I_ENTER or I_EXIT.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(H_VOID, 0, 0, ())
+VMI(H_VOID, 0, 0, (), ())
 { ARGP++;
   NEXT_INSTRUCTION;
 }
 END_VMI
 
 
-VMI(H_VOID_N, 0, 1, (CA1_INTEGER))
-{ ARGP += (int)*PC++;
+VMI(H_VOID_N, 0, 1, (CA1_INTEGER), (nvoids))
+{ ARGP += (int)nvoids;
   NEXT_INSTRUCTION;
 }
 END_VMI
@@ -742,9 +742,8 @@ When in write-mode, ARGP points  to   uninitialised  data  on the global
 stack that must be treated as a variable.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(H_VAR, 0, 1, (CA1_VAR))
-{ Word k = varFrameP(FR, (int)*PC++);
-  int rc;
+VMI(H_VAR, 0, 1, (CA1_VAR), (k))
+{ int rc;
 
   if ( UMODE == uwrite )
   { if ( LD->prolog_flag.occurs_check == OCCURS_CHECK_FALSE )
@@ -761,7 +760,7 @@ VMI(H_VAR, 0, 1, (CA1_VAR))
 	    { raiseStackOverflow(rc);
 	      THROW_EXCEPTION;
 	    }
-	    k = varFrameP(FR, (int)PC[-1]);
+	    RESTORE_VAR(k);
 	    deRef(k);
 	  }
 	  setVar(*ARGP);
@@ -805,12 +804,12 @@ in some compound term as H_FIRSTVAR is not generated for plain variables
 in the head.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(H_FIRSTVAR, 0, 1, (CA1_FVAR))
+VMI(H_FIRSTVAR, 0, 1, (CA1_FVAR), (v))
 { if ( UMODE == uwrite )
   { setVar(*ARGP);
-    varFrame(FR, *PC++) = makeRefG(ARGP);
+    *v = makeRefG(ARGP);
   } else
-  { varFrame(FR, *PC++) = (needsRef(*ARGP) ? makeRefG(ARGP) : *ARGP);
+  { *v = (needsRef(*ARGP) ? makeRefG(ARGP) : *ARGP);
   }
   ARGP++;
   NEXT_INSTRUCTION;
@@ -831,19 +830,17 @@ H_RFUNCTOR: Right-most functor.  Achieves right-argument optimization of
 the argument stack.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(H_FUNCTOR, 0, 1, (CA1_FUNC))
+VMI(H_FUNCTOR, 0, 1, (CA1_FUNC), (f))
 { pushArgumentStack((Word)((intptr_t)(ARGP + 1)|UMODE));
-  VMI_GOTO(H_RFUNCTOR);
+  VMI_GOTO(H_RFUNCTOR, f);
 }
 END_VMI
 
-VMI(H_RFUNCTOR, 0, 1, (CA1_FUNC))
-{ functor_t f;
-  Word p;
+VMI(H_RFUNCTOR, 0, 1, (CA1_FUNC), (f))
+{ Word p;
 
-  IF_WRITE_MODE_GOTO(B_RFUNCTOR);
+  IF_WRITE_MODE_GOTO(B_RFUNCTOR, f);
 
-  f = (functor_t) *PC++;
   deRef2(ARGP, p);
   if ( canBind(*p) )
   { size_t arity = arityFunctor(f);
@@ -875,7 +872,7 @@ END_VMI
 H_LIST:  As H_FUNCTOR, but using ./2 as predefined functor.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(H_LIST, 0, 0, ())
+VMI(H_LIST, 0, 0, (), ())
 { pushArgumentStack((Word)((intptr_t)(ARGP + 1)|UMODE));
 
   VMI_GOTO(H_RLIST);
@@ -883,7 +880,7 @@ VMI(H_LIST, 0, 0, ())
 END_VMI
 
 
-VMI(H_RLIST, 0, 0, ())
+VMI(H_RLIST, 0, 0, (), ())
 { Word p;
   word w;
 
@@ -927,7 +924,7 @@ END_VMI
 H_POP: Pop the saved argument pointer pushed by H_FUNCTOR and H_LIST.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(H_POP, 0, 0, ())
+VMI(H_POP, 0, 0, (), ())
 { ARGP = *--aTop;
   UMODE = ((int)(uintptr_t)ARGP & uwrite);
   ARGP = (Word)((intptr_t)ARGP&~uwrite);
@@ -945,7 +942,7 @@ predicates:
 	pred([H|T], ...) :-
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(H_LIST_FF, 0, 2, (CA1_FVAR,CA1_FVAR))
+VMI(H_LIST_FF, 0, 2, (CA1_FVAR,CA1_FVAR), (v1, v2))
 { Word p;
 
   if ( UMODE == uwrite )
@@ -956,9 +953,9 @@ VMI(H_LIST_FF, 0, 2, (CA1_FVAR,CA1_FVAR))
 
     if ( isList(*p) )
     { p = argTermP(*p, 0);
-      varFrame(FR, *PC++) = (needsRef(*p) ? makeRefG(p) : *p);
+      *v1 = (needsRef(*p) ? makeRefG(p) : *p);
       p++;
-      varFrame(FR, *PC++) = (needsRef(*p) ? makeRefG(p) : *p);
+      *v2 = (needsRef(*p) ? makeRefG(p) : *p);
     } else if ( canBind(*p) )
     { word c;
       Word ap;
@@ -969,13 +966,14 @@ VMI(H_LIST_FF, 0, 2, (CA1_FVAR,CA1_FVAR))
 			      p = ARGP;
 			    else
 			      deRef2(ARGP, p);
+			    RESTORE_VARS(v1, v2);
 			  });
       ap = gTop;
       gTop = ap+3;
       c = consPtr(ap, TAG_COMPOUND|STG_GLOBAL);
       *ap++ = FUNCTOR_dot2;
-      setVar(*ap); varFrame(FR, *PC++) = makeRefG(ap); ap++;
-      setVar(*ap); varFrame(FR, *PC++) = makeRefG(ap);
+      setVar(*ap); *v1 = makeRefG(ap); ap++;
+      setVar(*ap); *v2 = makeRefG(ap);
       if ( UMODE == uwrite )
 	*p = c;
       else
@@ -1002,21 +1000,20 @@ frame and therefore can just fill the argument. Trailing is not needed as
 this is above the stack anyway.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(B_ATOM, VIF_LCO, 1, (CA1_DATA))
-{ word c = (word)*PC++;
-  pushVolatileAtom(c);
+VMI(B_ATOM, VIF_LCO, 1, (CA1_DATA), (c))
+{ pushVolatileAtom(c);
   *ARGP++ = c;
   NEXT_INSTRUCTION;
 }
 END_VMI
 
-VMI(B_SMALLINT, VIF_LCO, 1, (CA1_DATA))
-{ *ARGP++ = (word)*PC++;
+VMI(B_SMALLINT, VIF_LCO, 1, (CA1_DATA), (c))
+{ *ARGP++ = c;
   NEXT_INSTRUCTION;
 }
 END_VMI
 
-VMI(B_NIL, VIF_LCO, 0, ())
+VMI(B_NIL, VIF_LCO, 0, (), ())
 { *ARGP++ = ATOM_nil;
   NEXT_INSTRUCTION;
 }
@@ -1030,22 +1027,21 @@ tagged integer.
 TBD:	Merge the code writing longs to the stack
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(B_INTEGER, 0, 1, (CA1_INTEGER))
+VMI(B_INTEGER, 0, 1, (CA1_INTEGER), (ivar))
 { Word p;
   union
   { int64_t val;
     word w[WORDS_PER_INT64];
   } cvt;
-  Word vp = cvt.w;
 
   ENSURE_GLOBAL_SPACE(2+WORDS_PER_INT64, (void)0);
   p = gTop;
   gTop += 2+WORDS_PER_INT64;
 
-  cvt.val = (int64_t)(intptr_t)*PC++;
+  cvt.val = (int64_t)ivar;
   *ARGP++ = consPtr(p, TAG_INTEGER|STG_GLOBAL);
   *p++ = mkIndHdr(WORDS_PER_INT64, TAG_INTEGER);
-  vp = cpInt64Data(&p, vp);
+  cpInt64Data(&p, cvt.w);
   *p++ = mkIndHdr(WORDS_PER_INT64, TAG_INTEGER);
   NEXT_INSTRUCTION;
 }
@@ -1056,9 +1052,8 @@ END_VMI
 B_INT64: 64-bit (int64_t) in the body.  See H_INT64
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(B_INT64, 0, WORDS_PER_INT64, (CA1_INT64))
+VMI(B_INT64, 0, WORDS_PER_INT64, (CA1_INT64), (i64ptr))
 { Word p;
-  size_t i;
 
   ENSURE_GLOBAL_SPACE(2+WORDS_PER_INT64, (void)0);
   p = gTop;
@@ -1066,8 +1061,7 @@ VMI(B_INT64, 0, WORDS_PER_INT64, (CA1_INT64))
 
   *ARGP++ = consPtr(p, TAG_INTEGER|STG_GLOBAL);
   *p++ = mkIndHdr(WORDS_PER_INT64, TAG_INTEGER);
-  for(i=0; i<WORDS_PER_INT64; i++)
-    *p++ = (word)*PC++;
+  cpInt64Data(&p, i64ptr);
   *p++ = mkIndHdr(WORDS_PER_INT64, TAG_INTEGER);
 
   NEXT_INSTRUCTION;
@@ -1080,7 +1074,7 @@ B_FLOAT: Float in the  body.  PC  is   followed  by  a  double in native
 representation.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(B_FLOAT, 0, WORDS_PER_DOUBLE, (CA1_FLOAT))
+VMI(B_FLOAT, 0, WORDS_PER_DOUBLE, (CA1_FLOAT), (fptr))
 { Word p;
 
   ENSURE_GLOBAL_SPACE(2+WORDS_PER_DOUBLE, (void)0);
@@ -1089,7 +1083,7 @@ VMI(B_FLOAT, 0, WORDS_PER_DOUBLE, (CA1_FLOAT))
 
   *ARGP++ = consPtr(p, TAG_FLOAT|STG_GLOBAL);
   *p++ = mkIndHdr(WORDS_PER_DOUBLE, TAG_FLOAT);
-  PC = cpDoubleData(&p, PC);
+  cpDoubleData(&p, fptr);
   *p++ = mkIndHdr(WORDS_PER_DOUBLE, TAG_FLOAT);
   NEXT_INSTRUCTION;
 }
@@ -1104,24 +1098,23 @@ Both copy following indirect to the  global   stack.  See also H_MPZ and
 H_STRING.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(B_MPZ, 0, VM_DYNARGC, (CA1_MPZ))
+VMI(B_MPZ, 0, VM_DYNARGC, (CA1_MPZ), (mpzarg))
 { SEPARATE_VMI;
-  VMI_GOTO(B_STRING);
+  VMI_GOTO(B_STRING, mpzarg);
 }
 END_VMI
 
-VMI(B_MPQ, 0, VM_DYNARGC, (CA1_MPQ))
+VMI(B_MPQ, 0, VM_DYNARGC, (CA1_MPQ), (mpqarg))
 { SEPARATE_VMI;
-  VMI_GOTO(B_STRING);
+  VMI_GOTO(B_STRING, mpqarg);
 }
 END_VMI
 
-VMI(B_STRING, 0, VM_DYNARGC, (CA1_STRING))
-{ size_t sz = gsizeIndirectFromCode(PC);
+VMI(B_STRING, 0, VM_DYNARGC, (CA1_STRING), (strarg))
+{ size_t sz = ARG_WSIZE(strarg) + 1;
 
   ENSURE_GLOBAL_SPACE(sz, (void)0);
-  struct word_and_Code retval = VM_globalIndirectFromCode(PC PASS_LD);
-  PC = retval.code;
+  struct word_and_Code retval = VM_globalIndirectFromCode(strarg PASS_LD);
   *ARGP++ = retval.word;
   NEXT_INSTRUCTION;
 }
@@ -1138,10 +1131,8 @@ the reference link in case *k turns out to be variable.
 ARGP is pointing into the term on the global stack we are creating.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(B_ARGVAR, 0, 1, (CA1_VAR))
-{ Word k = varFrameP(FR, *PC++);
-
-  deRef(k);
+VMI(B_ARGVAR, 0, 1, (CA1_VAR), (k))
+{ deRef(k);
   if ( isVar(*k) )
   { if ( ARGP < k )
     { if ( tTop+1 > tMax )
@@ -1155,7 +1146,7 @@ VMI(B_ARGVAR, 0, 1, (CA1_VAR))
 	  assert(exception_term);
 	  THROW_EXCEPTION;
 	}
-	k = varFrameP(FR, (int)PC[-1]);
+	RESTORE_VAR(k);
 	deRef(k);
       }
       setVar(*ARGP);
@@ -1183,23 +1174,23 @@ variable, so we either copy the value   or make a reference. Trailing is
 not needed as we are writing above the stack.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(B_VAR0, VIF_LCO, 0, ())
+VMI(B_VAR0, VIF_LCO, 0, (), ())
 { VMH_GOTO(bvar_cont, VAROFFSET(0));
 }
 END_VMI
 
-VMI(B_VAR1, VIF_LCO, 0, ())
+VMI(B_VAR1, VIF_LCO, 0, (), ())
 { VMH_GOTO(bvar_cont, VAROFFSET(1));
 }
 END_VMI
 
-VMI(B_VAR2, VIF_LCO, 0, ())
+VMI(B_VAR2, VIF_LCO, 0, (), ())
 { VMH_GOTO(bvar_cont, VAROFFSET(2));
 }
 END_VMI
 
-VMI(B_VAR, VIF_LCO, 1, (CA1_VAR))
-{ VMH_GOTO(bvar_cont, (int)*PC++);
+VMI(B_VAR, VIF_LCO, 1, (CA1_VAR), (p))
+{ VMH_GOTO(bvar_cont, ARG_VARNUM(p));
 }
 END_VMI
 
@@ -1240,16 +1231,16 @@ Note  that  the  B_UNIFY_FIRSTVAR  assumes  write   mode,  but  this  is
 unimportant because the compiler generates write (B_*) instructions.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(B_UNIFY_FIRSTVAR, VIF_BREAK, 1, (CA1_FVAR))
-{ ARGP = varFrameP(FR, (int)*PC++);
+VMI(B_UNIFY_FIRSTVAR, VIF_BREAK, 1, (CA1_FVAR), (v))
+{ ARGP = v;
   setVar(*ARGP);			/* needed for GC */
   VMH_GOTO(unify_var_cont);
 }
 END_VMI
 
 
-VMI(B_UNIFY_VAR, VIF_BREAK, 1, (CA1_VAR))
-{ ARGP = varFrameP(FR, (int)*PC++);
+VMI(B_UNIFY_VAR, VIF_BREAK, 1, (CA1_VAR), (v))
+{ ARGP = v;
   VMH_GOTO(unify_var_cont);
 }
 END_VMI
@@ -1276,7 +1267,7 @@ VMH(unify_var_cont, 0, (), ())
 END_VMH
 
 
-VMI(B_UNIFY_EXIT, 0, 0, ())
+VMI(B_UNIFY_EXIT, 0, 0, (), ())
 { ARGP = argFrameP(lTop, 0);
   if ( SLOW_UNIFY )
   { NFR = lTop;
@@ -1296,10 +1287,8 @@ END_VMI
 Unify two variables.  F stands for a first-var; V for any other var
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(B_UNIFY_FF, VIF_BREAK, 2, (CA1_FVAR,CA1_FVAR))
-{ ENSURE_GLOBAL_SPACE(2, (void)0);
-  Word v1 = varFrameP(FR, (int)*PC++);
-  Word v2 = varFrameP(FR, (int)*PC++);
+VMI(B_UNIFY_FF, VIF_BREAK, 2, (CA1_FVAR,CA1_FVAR), (v1, v2))
+{ ENSURE_GLOBAL_SPACE_FOR_VARS(v1, v2);
   Word v  = gTop++;
 
   setVar(*v);
@@ -1330,17 +1319,15 @@ END_VMI
  * GUI tracer.
  */
 
-VMI(B_UNIFY_VF, VIF_BREAK, 2, (CA1_FVAR,CA1_VAR))
+VMI(B_UNIFY_VF, VIF_BREAK, 2, (CA1_FVAR,CA1_VAR), (f, v))
 { SEPARATE_VMI;
-  VMI_GOTO(B_UNIFY_FV);
+  VMI_GOTO(B_UNIFY_FV, f, v);
 }
 END_VMI
 
 
-VMI(B_UNIFY_FV, VIF_BREAK, 2, (CA1_FVAR,CA1_VAR))
-{ ENSURE_GLOBAL_SPACE(2, (void)0);
-  Word f = varFrameP(FR, (int)*PC++);
-  Word v = varFrameP(FR, (int)*PC++);
+VMI(B_UNIFY_FV, VIF_BREAK, 2, (CA1_FVAR,CA1_VAR), (f, v))
+{ ENSURE_GLOBAL_SPACE_FOR_VARS(f, v);
 
   if ( isVar(*v) )
     globaliseVar(v);
@@ -1360,16 +1347,12 @@ VMI(B_UNIFY_FV, VIF_BREAK, 2, (CA1_FVAR,CA1_VAR))
 END_VMI
 
 
-VMI(B_UNIFY_VV, VIF_BREAK, 2, (CA1_VAR,CA1_VAR))
+VMI(B_UNIFY_VV, VIF_BREAK, 2, (CA1_VAR,CA1_VAR), (v1, v2))
 { int rc;
-  Word v1 = varFrameP(FR, (int)*PC++);
-  Word v2 = varFrameP(FR, (int)*PC++);
 
   if ( LD->slow_unify )
   { if ( isVar(*v1) || isVar(*v2) )
-    { ENSURE_GLOBAL_SPACE(2, { v1 = varFrameP(FR, PC[-2]);
-			       v2 = varFrameP(FR, PC[-1]);
-			     });
+    { ENSURE_GLOBAL_SPACE_FOR_VARS(v1, v2);
       if ( isVar(*v1) )
 	globaliseVar(v1);
       if ( isVar(*v2) )
@@ -1409,12 +1392,9 @@ B_UNIFY_FC: Unify first variable with a constant.  Always succeeds, no
 need for wakeup.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(B_UNIFY_FC, VIF_BREAK, 2, (CA1_FVAR, CA1_DATA))
-{ Word f = varFrameP(FR, (int)*PC++);
-  word c = (word)*PC++;
-
-  if ( LD->slow_unify )
-  { ENSURE_GLOBAL_SPACE(1, f = varFrameP(FR, PC[-2]));
+VMI(B_UNIFY_FC, VIF_BREAK, 2, (CA1_FVAR, CA1_DATA), (f, c))
+{ if ( LD->slow_unify )
+  { ENSURE_GLOBAL_SPACE_FOR_VARS(f);
     globaliseFirstVar(f);
     ARGP = argFrameP(lTop, 0);
     *ARGP++ = *f;
@@ -1432,13 +1412,10 @@ END_VMI
 B_UNIFY_VC: Unify a variable (not first) with a constant in the body.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(B_UNIFY_VC, VIF_BREAK, 2, (CA1_VAR, CA1_DATA))
-{ Word k = varFrameP(FR, (int)*PC++);
-  word c = (word)*PC++;
-
-  if ( LD->slow_unify )
+VMI(B_UNIFY_VC, VIF_BREAK, 2, (CA1_VAR, CA1_DATA), (k, c))
+{ if ( LD->slow_unify )
   { if ( isVar(*k) )
-    { ENSURE_GLOBAL_SPACE(1, k = varFrameP(FR, (int)PC[-2]));
+    { ENSURE_GLOBAL_SPACE_FOR_VARS(k);
       globaliseVar(k);
     }
     ARGP = argFrameP(lTop, 0);
@@ -1452,7 +1429,7 @@ VMI(B_UNIFY_VC, VIF_BREAK, 2, (CA1_VAR, CA1_DATA))
     NEXT_INSTRUCTION;
   if ( canBind(*k) )
   { ENSURE_GLOBAL_SPACE(0,
-			{ k = varFrameP(FR, (int)PC[-2]);
+			{ RESTORE_VAR(k);
 			  deRef(k);
 			});
     bindConst(k, c);
@@ -1468,17 +1445,13 @@ END_VMI
 B_EQ_VV: translation of	Var1 == Var2
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(B_EQ_VV, VIF_BREAK, 2, (CA1_VAR,CA1_VAR))
-{ Word v1 = varFrameP(FR, (int)*PC++);
-  Word v2 = varFrameP(FR, (int)*PC++);
-  int rc;
+VMI(B_EQ_VV, VIF_BREAK, 2, (CA1_VAR,CA1_VAR), (v1, v2))
+{ int rc;
 
 #ifdef O_DEBUGGER
   if ( debugstatus.debugging )
   { if ( isVar(*v1) || isVar(*v2) )
-    { ENSURE_GLOBAL_SPACE(2, { v1 = varFrameP(FR, (int)PC[-2]);
-			       v2 = varFrameP(FR, (int)PC[-1]);
-			     });
+    { ENSURE_GLOBAL_SPACE_FOR_VARS(v1, v2);
       if ( isVar(*v1) ) globaliseVar(v1);
       if ( isVar(*v2) ) globaliseVar(v2);
     }
@@ -1510,14 +1483,12 @@ END_VMH
 B_EQ_VC Var == constant
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(B_EQ_VC, VIF_BREAK, 2, (CA1_VAR,CA1_DATA))
-{ Word v1 = varFrameP(FR, (int)*PC++);
-  word c  = (word)*PC++;
-
+VMI(B_EQ_VC, VIF_BREAK, 2, (CA1_VAR,CA1_DATA), (v1, c))
+{ 
 #ifdef O_DEBUGGER
   if ( debugstatus.debugging )
   { if ( isVar(*v1) )
-    { ENSURE_GLOBAL_SPACE(1, v1 = varFrameP(FR, (int)PC[-2]));
+    { ENSURE_GLOBAL_SPACE_FOR_VARS(v1);
       globaliseVar(v1);
     }
 
@@ -1541,17 +1512,13 @@ END_VMI
 B_NEQ_VV: translation of Var1 \== Var2
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(B_NEQ_VV, VIF_BREAK, 2, (CA1_VAR,CA1_VAR))
-{ Word v1 = varFrameP(FR, (int)*PC++);
-  Word v2 = varFrameP(FR, (int)*PC++);
-  int rc;
+VMI(B_NEQ_VV, VIF_BREAK, 2, (CA1_VAR,CA1_VAR), (v1, v2))
+{ int rc;
 
 #ifdef O_DEBUGGER
   if ( debugstatus.debugging )
   { if ( isVar(*v1) || isVar(*v2) )
-    { ENSURE_GLOBAL_SPACE(2, { v1 = varFrameP(FR, (int)PC[-2]);
-			       v2 = varFrameP(FR, (int)PC[-1]);
-			     });
+    { ENSURE_GLOBAL_SPACE_FOR_VARS(v1, v2);
       if ( isVar(*v1) )
 	globaliseVar(v1);
       if ( isVar(*v2) )
@@ -1586,14 +1553,12 @@ END_VMH
 B_NEQ_VC Var == constant
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(B_NEQ_VC, VIF_BREAK, 2, (CA1_VAR,CA1_DATA))
-{ Word v1 = varFrameP(FR, (int)*PC++);
-  word c  = (word)*PC++;
-
+VMI(B_NEQ_VC, VIF_BREAK, 2, (CA1_VAR,CA1_DATA), (v1, c))
+{
 #ifdef O_DEBUGGER
   if ( debugstatus.debugging )
   { if ( isVar(*v1) )
-    { ENSURE_GLOBAL_SPACE(1, v1 = varFrameP(FR, (int)PC[-2]));
+    { ENSURE_GLOBAL_SPACE_FOR_VARS(v1);
       globaliseVar(v1);
     }
 
@@ -1618,15 +1583,14 @@ arg/3 special cases
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 
-VMI(B_ARG_CF, VIF_BREAK, 3, (CA1_DATA,CA1_VAR,CA1_FVAR))
-{ ENSURE_GLOBAL_SPACE(2, (void)0);
+VMI(B_ARG_CF, VIF_BREAK, 3, (CA1_DATA,CA1_VAR,CA1_FVAR), (c, v1, v2))
+{ ENSURE_GLOBAL_SPACE_FOR_VARS(v1, v2);
 
-  PC += 3;
   VMH_GOTO(arg3_fast,
 	   (Word)PC-3,
-	   valInt((word)PC[-3]),
-	   varFrameP(FR, (int)PC[-2]),
-	   varFrameP(FR, (int)PC[-1]));
+	   valInt(c),
+	   v1,
+	   v2);
 }
 END_VMI
 
@@ -1661,14 +1625,10 @@ VMH(arg3_slow, 3, (Word, Word, Word), (aidx, aterm, aarg))
 }
 END_VMH
 
-VMI(B_ARG_VF, VIF_BREAK, 3, (CA1_VAR,CA1_VAR,CA1_FVAR))
-{ Word aidx, aidx0, aterm, aarg;
+VMI(B_ARG_VF, VIF_BREAK, 3, (CA1_VAR,CA1_VAR,CA1_FVAR), (aidx0, aterm, aarg))
+{ Word aidx;
 
-  ENSURE_GLOBAL_SPACE(3, (void)0);
-
-  aidx0 = varFrameP(FR, (int)*PC++);
-  aterm = varFrameP(FR, (int)*PC++);
-  aarg  = varFrameP(FR, (int)*PC++);
+  ENSURE_GLOBAL_SPACE_FOR_VARS(aidx0, aterm, aarg);
 
   if ( isVar(*aidx0) ) globaliseVar(aidx0);
   if ( isVar(*aterm) ) globaliseVar(aterm);
@@ -1693,9 +1653,9 @@ ARGP points to the argument of a term on the global stack. The reference
 should therefore go from k to ARGP.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(B_ARGFIRSTVAR, 0, 1, (CA1_FVAR))
+VMI(B_ARGFIRSTVAR, 0, 1, (CA1_FVAR), (v))
 { setVar(*ARGP);
-  varFrame(FR, *PC++) = makeRefG(ARGP++);
+  *v = makeRefG(ARGP++);
   NEXT_INSTRUCTION;
 }
 END_VMI
@@ -1708,12 +1668,11 @@ to be a variable (it is uninitialised   memory) and make a reference. No
 trailing needed as we are writing in this and the next frame.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(B_FIRSTVAR, 0, 1, (CA1_FVAR))
-{ Word k = varFrameP(FR, *PC++);
-  Word v;
+VMI(B_FIRSTVAR, 0, 1, (CA1_FVAR), (k))
+{ Word v;
   word w;
 
-  ENSURE_GLOBAL_SPACE(1, k = varFrameP(FR, PC[-1]));
+  ENSURE_GLOBAL_SPACE_FOR_VARS(k);
   v = gTop++;
   setVar(*v);
   w = makeRefG(v);
@@ -1729,7 +1688,7 @@ B_VOID: A singleton variable in  the  body.   Ensure  the  argument is a
 variable.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(B_VOID, VIF_LCO, 0, ())
+VMI(B_VOID, VIF_LCO, 0, (), ())
 { setVar(*ARGP++);
   NEXT_INSTRUCTION;
 }
@@ -1745,16 +1704,15 @@ to avoid a function call.
 B_RFUNCTOR: right-argument recursive version of B_FUNCTOR
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(B_FUNCTOR, 0, 1, (CA1_FUNC))
+VMI(B_FUNCTOR, 0, 1, (CA1_FUNC), (f))
 { pushArgumentStack(ARGP+1);
-  VMI_GOTO(B_RFUNCTOR);
+  VMI_GOTO(B_RFUNCTOR, f);
 }
 END_VMI
 
 
-VMI(B_RFUNCTOR, 0, 1, (CA1_FUNC))
-{ functor_t f = (functor_t) *PC++;
-  size_t arity = arityFunctor(f);
+VMI(B_RFUNCTOR, 0, 1, (CA1_FUNC), (f))
+{ size_t arity = arityFunctor(f);
   Word ap;
 
   ENSURE_GLOBAL_SPACE(1+arity, (void)0);
@@ -1775,14 +1733,14 @@ B_LIST: Same as B_FUNCTOR for ./2
 B_RLIST: Right-argument recursive B_LIST
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(B_LIST, 0, 0, ())
+VMI(B_LIST, 0, 0, (), ())
 { pushArgumentStack(ARGP+1);
   VMI_GOTO(B_RLIST);
 }
 END_VMI
 
 
-VMI(B_RLIST, 0, 0, ())
+VMI(B_RLIST, 0, 0, (), ())
 { ENSURE_GLOBAL_SPACE(3, (void)0);
   *ARGP = consPtr(gTop, TAG_COMPOUND|STG_GLOBAL);
   ARGP = gTop;
@@ -1800,7 +1758,7 @@ END_VMI
 B_POP: Pop the argument pointer pushed by B_FUNCTOR.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(B_POP, 0, 0, ())
+VMI(B_POP, 0, 0, (), ())
 { ARGP = *--aTop;
   NEXT_INSTRUCTION;
 }
@@ -1826,14 +1784,14 @@ the start of the predicate and we can   check  the trail stack to verify
 the match was made without unification.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(I_CHP, 0, 0, ())
+VMI(I_CHP, 0, 0, (), ())
 { if ( BFR->frame != FR )
     newChoice(CHP_DEBUG, FR PASS_LD);
   NEXT_INSTRUCTION;
 }
 END_VMI
 
-VMI(I_SSU_CHOICE, 0, 0, ())
+VMI(I_SSU_CHOICE, 0, 0, (), ())
 { if ( tTop > BFR->mark.trailtop )
     CLAUSE_FAILED;
 
@@ -1841,7 +1799,7 @@ VMI(I_SSU_CHOICE, 0, 0, ())
 }
 END_VMI
 
-VMI(I_SSU_COMMIT, 0, 0, ())
+VMI(I_SSU_COMMIT, 0, 0, (), ())
 { if ( tTop > BFR->mark.trailtop )
     CLAUSE_FAILED;
 
@@ -1872,7 +1830,7 @@ makes debugging much more  difficult  as  the  system  will  do  a  deep
 backtrack without showing the fail ports explicitely.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(I_ENTER, VIF_BREAK, 0, ())
+VMI(I_ENTER, VIF_BREAK, 0, (), ())
 { ARGP = argFrameP(lTop, 0);
 
   if ( unlikely(LD->alerted) )
@@ -1909,10 +1867,8 @@ different  module  using  <module>:<head>  :-    <body>.  The  I_CONTEXT
 instruction immediately follows the I_ENTER. The argument is the module.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(I_CONTEXT, 0, 1, (CA1_MODULE))
-{ Module m = (Module)*PC++;
-
-  setContextModule(FR, m);
+VMI(I_CONTEXT, 0, 1, (CA1_MODULE), (m))
+{ setContextModule(FR, m);
 
   NEXT_INSTRUCTION;
 }
@@ -1932,10 +1888,8 @@ frame,  fill  the next frame and initialise the machine registers.  Then
 execution can continue at `next_instruction'
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(I_CALL, VIF_BREAK, 1, (CA1_PROC))
-{ Procedure proc = (Procedure) *PC++;
-
-  NFR = lTop;
+VMI(I_CALL, VIF_BREAK, 1, (CA1_PROC), (proc))
+{ NFR = lTop;
   setNextFrameFlags(NFR, FR);
   DEF = proc->definition;
   VMH_GOTO(normal_call);
@@ -2132,10 +2086,8 @@ runs normal I_CALL. This isn't too  bad,   as  it only affects the first
 call.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(I_DEPART, VIF_BREAK, 1, (CA1_PROC))
-{ Procedure proc = (Procedure) *PC++;
-
-  if ( (void *)BFR <= (void *)FR &&
+VMI(I_DEPART, VIF_BREAK, 1, (CA1_PROC), (proc))
+{ if ( (void *)BFR <= (void *)FR &&
        truePrologFlag(PLFLAG_LASTCALL) &&
        ( proc->definition->impl.any.defined ||
 	 true(proc->definition, PROC_DEFINED)) )
@@ -2186,22 +2138,20 @@ END_VMI
 I_DEPARTATM: procedure-module, context-module, procedure
 See I_CALLATM for details.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
-VMI(I_DEPARTATM, VIF_BREAK, 3, (CA1_MODULE, CA1_MODULE, CA1_PROC))
-{ PC++;						/* Ignore :-qualifier */
-  VMI_GOTO(I_DEPARTM);
+VMI(I_DEPARTATM, VIF_BREAK, 3, (CA1_MODULE, CA1_MODULE, CA1_PROC), (_proc_m, ctx_m, proc))
+{ VMI_GOTO(I_DEPARTM, ctx_m, proc);		/* Ignore :-qualifier */
+  MARK_USED(_proc_m);
 }
 END_VMI
 #endif
 
 
-VMI(I_DEPARTM, VIF_BREAK, 2, (CA1_MODULE, CA1_PROC))
+VMI(I_DEPARTM, VIF_BREAK, 2, (CA1_MODULE, CA1_PROC), (ctx_m, proc))
 { if ( (void *)BFR > (void *)FR || !truePrologFlag(PLFLAG_LASTCALL) )
-  { VMI_GOTO(I_CALLM);
+  { VMI_GOTO(I_CALLM, ctx_m, proc);
   } else
-  { Module m = (Module)*PC++;
-
-    setContextModule(FR, m);
-    VMI_GOTO(I_DEPART);
+  { setContextModule(FR, ctx_m);
+    VMI_GOTO(I_DEPART, proc);
   }
 }
 END_VMI
@@ -2245,7 +2195,7 @@ TBD: Insert a layer in between, so   this  never has to handle call-back
 from C.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(I_EXIT, VIF_BREAK, 0, ())
+VMI(I_EXIT, VIF_BREAK, 0, (), ())
 { LocalFrame leave;
 
   if ( unlikely(LD->alerted) )
@@ -2326,7 +2276,7 @@ wakeup and our current goal is  deterministic,   we  first pop it (i.e.,
 some sort of last-call optimization).
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(I_EXITFACT, 0, 0, ())
+VMI(I_EXITFACT, 0, 0, (), ())
 { if ( unlikely(LD->alerted) )
   {
 #if O_DEBUGGER
@@ -2373,7 +2323,7 @@ END_VMH
 Created for the return of the toplevel query.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(I_EXITQUERY, 0, 0, ())
+VMI(I_EXITQUERY, 0, 0, (), ())
 { assert(!FR->parent);
 
   QF = QueryFromQid(QID);		/* may be shifted: recompute */
@@ -2427,7 +2377,7 @@ again resumes the VM.
 '$yield' translates to I_YIELD
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(I_YIELD, VIF_BREAK, 0, ())
+VMI(I_YIELD, VIF_BREAK, 0, (), ())
 { Word p;
 
   QF = QueryFromQid(QID);
@@ -2487,10 +2437,8 @@ Ln: <normal sequence>
     I_DEPART proc
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(L_NOLCO, 0, 1, (CA1_JUMP))
-{ size_t jmp = *PC++;
-
-  if ( (void *)BFR <= (void *)FR && truePrologFlag(PLFLAG_LASTCALL) )
+VMI(L_NOLCO, 0, 1, (CA1_JUMP), (jmp))
+{ if ( (void *)BFR <= (void *)FR && truePrologFlag(PLFLAG_LASTCALL) )
     NEXT_INSTRUCTION;
 
   PC += jmp;
@@ -2507,10 +2455,8 @@ but we must not create a reference to   the B_VOID 0-variable. This is a
 simplified version of linkVal().
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(L_VAR, 0, 2, (CA1_FVAR,CA1_VAR))
-{ Word v1 = varFrameP(FR, (int)*PC++);
-  Word v2 = varFrameP(FR, (int)*PC++);
-  word w = *v2;
+VMI(L_VAR, 0, 2, (CA1_FVAR,CA1_VAR), (v1, v2))
+{ word w = *v2;
 
   while(isRef(w))
   { v2 = unRef(w);
@@ -2524,35 +2470,27 @@ VMI(L_VAR, 0, 2, (CA1_FVAR,CA1_VAR))
 }
 END_VMI
 
-VMI(L_VOID, 0, 1, (CA1_FVAR))
-{ Word v1 = varFrameP(FR, (int)*PC++);
-
-  setVar(*v1);
+VMI(L_VOID, 0, 1, (CA1_FVAR), (v1))
+{ setVar(*v1);
   NEXT_INSTRUCTION;
 }
 END_VMI
 
-VMI(L_ATOM, 0, 2, (CA1_FVAR,CA1_DATA))
-{ Word v1 = varFrameP(FR, (int)*PC++);
-  word  c = (word)*PC++;
-  pushVolatileAtom(c);
+VMI(L_ATOM, 0, 2, (CA1_FVAR,CA1_DATA), (v1, c))
+{ pushVolatileAtom(c);
   *v1 = c;
   NEXT_INSTRUCTION;
 }
 END_VMI
 
-VMI(L_NIL, 0, 1, (CA1_FVAR))
-{ Word v1 = varFrameP(FR, (int)*PC++);
-
-  *v1 = ATOM_nil;
+VMI(L_NIL, 0, 1, (CA1_FVAR), (v1))
+{ *v1 = ATOM_nil;
   NEXT_INSTRUCTION;
 }
 END_VMI
 
-VMI(L_SMALLINT, 0, 2, (CA1_FVAR,CA1_DATA))
-{ Word v1 = varFrameP(FR, (int)*PC++);
-  word  c = (word)*PC++;
-  *v1 = c;
+VMI(L_SMALLINT, 0, 2, (CA1_FVAR,CA1_DATA), (v1, c))
+{ *v1 = c;
   NEXT_INSTRUCTION;
 }
 END_VMI
@@ -2571,9 +2509,8 @@ problem.
 
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(I_LCALL, 0, 1, (CA1_PROC))
-{ Procedure proc = (Procedure)*PC++;
-  Module ctx0 = contextModule(FR);
+VMI(I_LCALL, 0, 1, (CA1_PROC), (proc))
+{ Module ctx0 = contextModule(FR);
 
   leaveDefinition(DEF);
   FR->clause = NULL;
@@ -2611,7 +2548,7 @@ VMI(I_LCALL, 0, 1, (CA1_PROC))
 }
 END_VMI
 
-VMI(I_TCALL, 0, 0, ())
+VMI(I_TCALL, 0, 0, (), ())
 { if ( true(FR, FR_WATCHED) )
   { SAVE_REGISTERS(QID);
     frameFinished(FR, FINISH_EXIT PASS_LD);
@@ -2638,7 +2575,7 @@ I_DET sets the determinism guard for  this predicate, implying that this
 predicate shall succeed deterministically.  It is bound to '$'.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(I_DET, 0, 0, ())
+VMI(I_DET, 0, 0, (), ())
 { set(FR, FR_DETGUARD|FR_DETGUARD_SET);
 
   VMI_GOTO(I_CUT);
@@ -2651,7 +2588,7 @@ frame. If we are in  debug-mode  we   create  a  new  CHP_DEBUG frame to
 provide proper debugger output.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(I_CUT, VIF_BREAK, 0, ())
+VMI(I_CUT, VIF_BREAK, 0, (), ())
 { clear(FR, FR_SSU_DET);
 
   if ( (LocalFrame)BFR <= FR )
@@ -2719,13 +2656,11 @@ END_VMI
 
 
 /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-C_JMP skips the amount stated in the pointed argument. The PC++ could be
-compiled out, but this is a bit more neath.
+C_JMP skips the amount stated in the pointed argument.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(C_JMP, 0, 1, (CA1_JUMP))
-{ PC += *PC;
-  PC++;
+VMI(C_JMP, 0, 1, (CA1_JUMP), (jmp))
+{ PC += jmp;
 
   NEXT_INSTRUCTION;
 }
@@ -2737,9 +2672,8 @@ C_OR: Create choice-point in the clause.  Argument is the amount to skip
 if the choice-point needs to be activated.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(C_OR, 0, 1, (CA1_JUMP))
-{ size_t skip = *PC++;
-  Choice ch;
+VMI(C_OR, 0, 1, (CA1_JUMP), (skip))
+{ Choice ch;
 
   if ( addPointer(lTop, sizeof(struct choice)) > (void*)lMax )
   { int rc;
@@ -2770,14 +2704,14 @@ garbage collector won't see it. We use  a term-reference because using a
 relative address simplifies the stack-shifter.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(C_SOFTIFTHEN, 0, 1, (CA1_CHP))
+VMI(C_SOFTIFTHEN, 0, 1, (CA1_CHP), (chp))
 { SEPARATE_VMI;
-  VMI_GOTO(C_IFTHEN);
+  VMI_GOTO(C_IFTHEN, chp);
 }
 END_VMI
 
-VMI(C_IFTHEN, 0, 1, (CA1_CHP))
-{ varFrame(FR, *PC++) = consTermRef(BFR);
+VMI(C_IFTHEN, 0, 1, (CA1_CHP), (chp))
+{ SET_CHOICEPOINT(chp, BFR);
 
   NEXT_INSTRUCTION;
 }
@@ -2786,29 +2720,43 @@ END_VMI
 /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 C_DET  is  like  C_NOT,  starting  a  block   that  is  asserted  to  be
 deterministic.
+
+Opcode sequence is as follows:
+
+    C_DET	chpvar		delta(false_lbl)
+    [ instructions asserted to be deterministic ]
+    C_DETTRUE
+    C_JMP	delta(end_lbl)
+    [ potential C_VAR and C_VAR_N instructions from balanceVars() ]
+false_lbl:
+    C_DETFALSE
+end_lbl:
+
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(C_DET, 0, 2, (CA1_CHP,CA1_JUMP))
+VMI(C_DET, 0, 2, (CA1_CHP,CA1_JUMP), (chp, jmp))
 { SEPARATE_VMI;
-  VMI_GOTO(C_IFTHENELSE);
+  VMI_GOTO(C_IFTHENELSE, chp, jmp);
 }
 END_VMI
 
-VMI(C_DETTRUE, 0, 1, (CA1_CHP))
-{ Choice och = (Choice) valTermRef(varFrame(FR, *PC));
-  Choice ch = BFR;
+VMI(C_DETTRUE, 0, 1, (CA1_CHP), (och))
+{ Choice ch = BFR;
 
+  /* If the current backtrack frame (ch) points to the choice created by
+   * C_DET (och), then this was indeed deterministic. Cut och, then
+   * execute the immediately-following C_JMP. */
   if ( ch->parent == och )
   { DEBUG(0, assert(ch->type == CHP_JUMP));
     BFR = och;
-    DEBUG(0, assert(PC[1] == encode(C_JMP)));
-    PC += PC[2];
-    PC += 3;
+    DEBUG(0, assert(PC[0] == encode(C_JMP)));
+    PC += PC[1];
+    PC += 2;
     NEXT_INSTRUCTION;
   }
 
   SAVE_REGISTERS(QID);
-  det_goal_error(FR, PC-1, ATOM_nondet PASS_LD);
+  det_goal_error(FR, PC-2, ATOM_nondet PASS_LD);
   LOAD_REGISTERS(QID);
   if ( exception_term )
     THROW_EXCEPTION;
@@ -2817,7 +2765,7 @@ VMI(C_DETTRUE, 0, 1, (CA1_CHP))
 }
 END_VMI
 
-VMI(C_DETFALSE, 0, 0, ())
+VMI(C_DETFALSE, 0, 0, (), ())
 { SAVE_REGISTERS(QID);
   det_goal_error(FR, PC-1, ATOM_fail PASS_LD);
   LOAD_REGISTERS(QID);
@@ -2836,30 +2784,28 @@ c,  which  would  otherwise  only  be    possible  to  distinguis  using
 look-ahead.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(C_NOT, 0, 2, (CA1_CHP,CA1_JUMP))
+VMI(C_NOT, 0, 2, (CA1_CHP,CA1_JUMP), (chp, jmp))
 { SEPARATE_VMI;
-  VMI_GOTO(C_IFTHENELSE);
+  VMI_GOTO(C_IFTHENELSE, chp, jmp);
 }
 END_VMI
 
 
-VMI(C_IFTHENELSE, 0, 2, (CA1_CHP,CA1_JUMP))
-{ varFrame(FR, *PC++) = consTermRef(BFR); /* == C_IFTHEN */
+VMI(C_IFTHENELSE, 0, 2, (CA1_CHP,CA1_JUMP), (chp, jmp))
+{ SET_CHOICEPOINT(chp, BFR); /* == C_IFTHEN */
 
-  VMI_GOTO(C_OR);
+  VMI_GOTO(C_OR, jmp);
 }
 END_VMI
 
-VMI(C_FASTCOND, 0, 2, (CA1_CHP,CA1_JUMP))
-{ size_t skip;
-
+VMI(C_FASTCOND, 0, 2, (CA1_CHP,CA1_JUMP), (chp, skip))
+{ 
 #ifdef O_DEBUGGER
   if ( unlikely(debugstatus.debugging) )
-    VMI_GOTO(C_IFTHENELSE);
+    VMI_GOTO(C_IFTHENELSE, chp, skip);
 #endif
 
-  varFrame(FR, *PC++) = consTermRef(BFR); /* == C_IFTHEN */
-  skip = *PC++;
+  SET_CHOICEPOINT(chp, BFR); /* == C_IFTHEN */
   LD->fast_condition = PC+skip;
   NEXT_INSTRUCTION;
 }
@@ -2871,11 +2817,10 @@ D_BREAK  turned  this  into  a  normal    choice  point.  In  that  case
 LD->fast_condition is NULL.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(C_FASTCUT, 0, 1, (CA1_CHP))
+VMI(C_FASTCUT, 0, 1, (CA1_CHP), (chp))
 { if ( LD->fast_condition == NULL )
-    VMI_GOTO(C_CUT);
+    VMI_GOTO(C_CUT, chp);
 
-  PC++;
   LD->fast_condition = NULL;
   NEXT_INSTRUCTION;
 }
@@ -2889,19 +2834,16 @@ wired in the clause.  Its task is to make the n-th variable slot of  the
 current frame to be a variable.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(C_VAR, 0, 1, (CA1_FVAR))
-{ setVar(varFrame(FR, *PC++));
+VMI(C_VAR, 0, 1, (CA1_FVAR), (v))
+{ setVar(*v);
 
   NEXT_INSTRUCTION;
 }
 END_VMI
 
 
-VMI(C_VAR_N, 0, 2, (CA1_FVAR,CA1_INTEGER))
-{ Word vp = varFrameP(FR, *PC++);
-  size_t count = *PC++;
-
-  while(count--)
+VMI(C_VAR_N, 0, 2, (CA1_FVAR,CA1_INTEGER), (vp, count))
+{ while(count--)
     setVar(*vp++);
 
   NEXT_INSTRUCTION;
@@ -2932,9 +2874,8 @@ the choice argument is the new choice  created by the disjunction, so we
 must cut its parent.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(C_LSCUT, 0, 1, (CA1_CHP))
-{ word chref = varFrame(FR, *PC++);
-  Choice ch;
+VMI(C_LSCUT, 0, 1, (CA1_CHP), (ch))
+{ word chref = *ARG_VARFRAMEP(ch);
 
   if ( (intptr_t)chref < 0 )
     chref = (word)-(intptr_t)chref;
@@ -2944,8 +2885,8 @@ VMI(C_LSCUT, 0, 1, (CA1_CHP))
 }
 END_VMI
 
-VMI(C_LCUT, 0, 1, (CA1_CHP))
-{ VMH_GOTO(c_lcut_cont, (Choice) valTermRef(varFrame(FR, *PC++)));
+VMI(C_LCUT, 0, 1, (CA1_CHP), (och))
+{ VMH_GOTO(c_lcut_cont, och);
 }
 END_VMI
 
@@ -2968,7 +2909,7 @@ I_CUTCHP cuts all  choice-points  after   the  specified  argument. This
 instruction is generated for $cut(Var), used by prolog_cut_to(Choice).
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(I_CUTCHP, 0, 0, ())
+VMI(I_CUTCHP, 0, 0, (), ())
 { Word a = argFrameP(FR, 0);
   Choice och;
 
@@ -2995,14 +2936,14 @@ VMI(I_CUTCHP, 0, 0, ())
 END_VMI
 
 
-VMI(C_SCUT, 0, 0, ())
+VMI(C_SCUT, 0, 0, (), ())
 { NEXT_INSTRUCTION;
 }
 END_VMI
 
-VMI(C_LCUTIFTHEN, 0, 1, (CA1_CHP))
+VMI(C_LCUTIFTHEN, 0, 1, (CA1_CHP), (och))
 { SEPARATE_VMI;
-  VMI_GOTO(C_CUT);
+  VMI_GOTO(C_CUT, och);
 }
 END_VMI
 
@@ -3025,10 +2966,8 @@ implementation below.
 TBD: Merge with dbgDiscardChoicesAfter()
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(C_CUT, 0, 1, (CA1_CHP))
-{ Choice och = (Choice) valTermRef(varFrame(FR, *PC));
-  PC++;					/* cannot be in macro! */
-  VMH_GOTO(c_cut, och);
+VMI(C_CUT, 0, 1, (CA1_CHP), (och))
+{ VMH_GOTO(c_cut, och);
 }
 END_VMI
 
@@ -3106,12 +3045,12 @@ reference to the choice-point in <choice-var>
 
 See pl-comp.c and C_SOFTCUT implementation for details.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
-VMI(C_SOFTIF, 0, 2, (CA1_CHP,CA1_JUMP))
-{ varFrame(FR, *PC++) = consTermRef(lTop);	/* see C_SOFTCUT */
+VMI(C_SOFTIF, 0, 2, (CA1_CHP,CA1_JUMP), (chp, jmp))
+{ SET_CHOICEPOINT(chp, lTop);	/* see C_SOFTCUT */
 
   DEBUG(MSG_CUT, Sdprintf("Creating *-> choice at %p (%d)\n",
 			  lTop, loffset(lTop)));
-  VMI_GOTO(C_OR);
+  VMI_GOTO(C_OR, jmp);
 }
 END_VMI
 
@@ -3127,12 +3066,11 @@ negative term reference to the parent.   A second execution of C_SOFTCUT
 with a negative term reference is simply ignored.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(C_SOFTCUT, 0, 1, (CA1_CHP))
-{ Word chref = varFrameP(FR, *PC++);
+VMI(C_SOFTCUT, 0, 1, (CA1_CHP), (ch))
+{ Word chref = ARG_VARFRAMEP(ch);
 
   if ( (intptr_t)*chref > 0 )
-  { Choice ch = (Choice)valTermRef((term_t)*chref);
-    Choice bfr = BFR;
+  { Choice bfr = BFR;
 
     DEBUG(MSG_SOFTCUT,
 	  Sdprintf("Killing choice %s from %s\n",
@@ -3166,7 +3104,7 @@ C_END is a dummy instruction to help the decompiler to find the end of A
 semantics. They are different terms however.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(C_END, 0, 0, ())
+VMI(C_END, 0, 0, (), ())
 { NEXT_INSTRUCTION;
 }
 END_VMI
@@ -3176,7 +3114,7 @@ END_VMI
 C_FAIL is equivalent to fail/0. Used to implement \+/1.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(C_FAIL, 0, 0, ())
+VMI(C_FAIL, 0, 0, (), ())
 { BODY_FAILED;
 }
 END_VMI
@@ -3187,7 +3125,7 @@ I_FAIL: Translation of fail/0. Same as C_FAIL, but we make a normal call
 when in debug-mode, so we can trace the call.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(I_FAIL, VIF_BREAK, 0, ())
+VMI(I_FAIL, VIF_BREAK, 0, (), ())
 {
 #ifdef O_DEBUGGER
   if ( debugstatus.debugging )
@@ -3207,7 +3145,7 @@ END_VMI
 I_TRUE: Translation of true/0.  See also I_FAIL.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(I_TRUE, VIF_BREAK, 0, ())
+VMI(I_TRUE, VIF_BREAK, 0, (), ())
 {
 #ifdef O_DEBUGGER
   if ( debugstatus.debugging )
@@ -3227,9 +3165,8 @@ END_VMI
 /** var(@Term)
 */
 
-VMI(I_VAR, VIF_BREAK, 1, (CA1_VAR))
-{ Word p = varFrameP(FR, (int)*PC++);
-
+VMI(I_VAR, VIF_BREAK, 1, (CA1_VAR), (p))
+{
 #ifdef O_DEBUGGER
   if ( unlikely(debugstatus.debugging) )
   { VMH_GOTO(debug_pred1, FUNCTOR_var1, p);
@@ -3262,9 +3199,8 @@ END_VMH
 /** nonvar(@Term)
 */
 
-VMI(I_NONVAR, VIF_BREAK, 1, (CA1_VAR))
-{ Word p = varFrameP(FR, (int)*PC++);
-
+VMI(I_NONVAR, VIF_BREAK, 1, (CA1_VAR), (p))
+{
 #ifdef O_DEBUGGER
   if ( unlikely(debugstatus.debugging) )
   { VMH_GOTO(debug_pred1, FUNCTOR_nonvar1, p);
@@ -3285,14 +3221,12 @@ END_VMI
 
 #ifdef O_DEBUGGER
 #define TYPE_TEST(functor, test)           \
-	Word p = varFrameP(FR, (int)*PC++);\
 	deRef(p);                          \
         if ( test(*p) )			   \
           NEXT_INSTRUCTION;                \
 	FASTCOND_FAILED;
 #else
 #define TYPE_TEST(functor, test)		\
-	Word p = varFrameP(FR, (int)*PC++);	\
 	if ( unlikely(debugstatus.debugging) )	\
         { VMH_GOTO(debug_pred1, functor, p);	\
 	}					\
@@ -3302,47 +3236,47 @@ END_VMI
 	FASTCOND_FAILED;
 #endif
 
-VMI(I_INTEGER, VIF_BREAK, 1, (CA1_VAR))
+VMI(I_INTEGER, VIF_BREAK, 1, (CA1_VAR), (p))
 { TYPE_TEST(FUNCTOR_integer1, isInteger);
 }
 END_VMI
 
-VMI(I_RATIONAL, VIF_BREAK, 1, (CA1_VAR))
+VMI(I_RATIONAL, VIF_BREAK, 1, (CA1_VAR), (p))
 { TYPE_TEST(FUNCTOR_rational1, isRational);
 }
 END_VMI
 
-VMI(I_FLOAT, VIF_BREAK, 1, (CA1_VAR))
+VMI(I_FLOAT, VIF_BREAK, 1, (CA1_VAR), (p))
 { TYPE_TEST(FUNCTOR_float1, isFloat);
 }
 END_VMI
 
-VMI(I_NUMBER, VIF_BREAK, 1, (CA1_VAR))
+VMI(I_NUMBER, VIF_BREAK, 1, (CA1_VAR), (p))
 { TYPE_TEST(FUNCTOR_number1, isNumber);
 }
 END_VMI
 
-VMI(I_ATOMIC, VIF_BREAK, 1, (CA1_VAR))
+VMI(I_ATOMIC, VIF_BREAK, 1, (CA1_VAR), (p))
 { TYPE_TEST(FUNCTOR_atomic1, isAtomic);
 }
 END_VMI
 
-VMI(I_ATOM, VIF_BREAK, 1, (CA1_VAR))
+VMI(I_ATOM, VIF_BREAK, 1, (CA1_VAR), (p))
 { TYPE_TEST(FUNCTOR_atom1, isTextAtom);
 }
 END_VMI
 
-VMI(I_STRING, VIF_BREAK, 1, (CA1_VAR))
+VMI(I_STRING, VIF_BREAK, 1, (CA1_VAR), (p))
 { TYPE_TEST(FUNCTOR_string1, isString);
 }
 END_VMI
 
-VMI(I_COMPOUND, VIF_BREAK, 1, (CA1_VAR))
+VMI(I_COMPOUND, VIF_BREAK, 1, (CA1_VAR), (p))
 { TYPE_TEST(FUNCTOR_compound1, isTerm);
 }
 END_VMI
 
-VMI(I_CALLABLE, VIF_BREAK, 1, (CA1_VAR))
+VMI(I_CALLABLE, VIF_BREAK, 1, (CA1_VAR), (p))
 { TYPE_TEST(FUNCTOR_callable1, isCallableLD);
 }
 END_VMI
@@ -3362,7 +3296,7 @@ this supervisor (see resetProcedure()). The task of this is to
         supervisor (see pl-index.c).
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(S_VIRGIN, 0, 0, ())
+VMI(S_VIRGIN, 0, 0, (), ())
 { lTop = (LocalFrame)argFrameP(FR, FR->predicate->functor->arity);
 
   if ( !DEF->impl.any.defined && false(DEF, PROC_DEFINED) )
@@ -3404,7 +3338,7 @@ unknown flag of the module has no   immediate consequences. Hence we use
 one instruction and dynamic checking.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(S_UNDEF, 0, 0, ())
+VMI(S_UNDEF, 0, 0, (), ())
 { switch( getUnknownModule(DEF->module) )
   { case UNKNOWN_ERROR:
     { fid_t fid;
@@ -3471,7 +3405,7 @@ possible stack-expansion in ENSURE_LOCAL_SPACE(), which   is  why we use
 the temporary variable `cl' for storing the clause.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(S_STATIC, 0, 0, ())
+VMI(S_STATIC, 0, 0, (), ())
 { ClauseRef cl;
   struct clause_choice chp;
 
@@ -3520,7 +3454,7 @@ indexing and need to lock the predicate. This VMI can also handle static
 code.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(S_DYNAMIC, 0, 0, ())
+VMI(S_DYNAMIC, 0, 0, (), ())
 { enterDefinition(DEF);
 
   SEPARATE_VMI;
@@ -3533,7 +3467,7 @@ END_VMI
 S_THREAD_LOCAL: Get thread-local definition
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(S_THREAD_LOCAL, 0, 0, ())
+VMI(S_THREAD_LOCAL, 0, 0, (), ())
 { DEF = getProcDefinition__LD(DEF PASS_LD);
   setFramePredicate(FR, DEF);
   setGenerationFrame(FR);
@@ -3556,7 +3490,7 @@ creating the term and follow the trie   nodes  directly. Most likely not
 worth the trouble.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(S_INCR_DYNAMIC, 0, 0, ())
+VMI(S_INCR_DYNAMIC, 0, 0, (), ())
 { enterDefinition(DEF);
   atom_t current = *valTermRef(LD->tabling.idg_current);
   trie *ctrie;
@@ -3631,7 +3565,7 @@ END_VMI
 S_WRAP: Call a wrapped predicate from a closure.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(S_WRAP, 0, 0, ())
+VMI(S_WRAP, 0, 0, (), ())
 { Code codes = DEF->impl.wrapped.supervisor;
 
   if ( codes[0] == encode(S_VIRGIN) )
@@ -3657,7 +3591,7 @@ S_MULTIFILE: Multifile predicate.  These need to be aware of new
 clauses that can be added at runtime.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(S_MULTIFILE, 0, 0, ())
+VMI(S_MULTIFILE, 0, 0, (), ())
 { VMI_GOTO(S_STATIC);
 }
 END_VMI
@@ -3670,10 +3604,8 @@ and for the last one of a disjunction.
 TBD: get rid of clause-references
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(S_TRUSTME, 0, 1, (CA1_CLAUSEREF))
-{ ClauseRef cref = (ClauseRef)*PC++;
-
-  ARGP = argFrameP(FR, 0);
+VMI(S_TRUSTME, 0, 1, (CA1_CLAUSEREF), (cref))
+{ ARGP = argFrameP(FR, 0);
   TRUST_CLAUSE(cref);
 }
 END_VMI
@@ -3694,13 +3626,11 @@ properly.  If  not,  wrapping   a    foreign   predicate   will  confuse
 setStartOfVMI().
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(S_CALLWRAPPER, 0, 3, (CA1_CLAUSEREF,CA1_DATA,CA1_DATA))
-{ ClauseRef cref = (ClauseRef)*PC;
-
-  PC += 3;
-  ARGP = argFrameP(FR, 0);
+VMI(S_CALLWRAPPER, 0, 3, (CA1_CLAUSEREF,CA1_DATA,CA1_DATA), (cref, _blob, _name))
+{ ARGP = argFrameP(FR, 0);
   FR->predicate = DEF = cref->value.clause->predicate;
   TRUST_CLAUSE(cref);
+  MARK_USED(_blob, _name);
 }
 END_VMI
 
@@ -3715,7 +3645,7 @@ is
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 
-VMI(S_ALLCLAUSES, 0, 0, ())		/* Uses CHP_JUMP */
+VMI(S_ALLCLAUSES, 0, 0, (), ())		/* Uses CHP_JUMP */
 { VMH_GOTO(next_clause, DEF->impl.clauses.first_clause);
 }
 END_VMI
@@ -3733,7 +3663,7 @@ VMH(next_clause, 1, (ClauseRef), (cref))
 END_VMH
 
 
-VMI(S_NEXTCLAUSE, 0, 0, ())
+VMI(S_NEXTCLAUSE, 0, 0, (), ())
 { ClauseRef cref = CL->next;
 
   if ( debugstatus.debugging && !debugstatus.suspendTrace )
@@ -3780,23 +3710,21 @@ S_LIST: Predicate consisting of two clauses, one of them using [] and
 the other [_|_].
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(S_LIST, 0, 2, (CA1_CLAUSEREF, CA1_CLAUSEREF))
+VMI(S_LIST, 0, 2, (CA1_CLAUSEREF, CA1_CLAUSEREF), (cempty, clist))
 { ClauseRef cref;
   Word k;
 
   ARGP = argFrameP(FR, 0);
   deRef2(ARGP, k);
   if ( isList(*k) )
-    cref = (ClauseRef)PC[1];
+    cref = clist;
   else if ( isNil(*k) )
-    cref = (ClauseRef)PC[0];
+    cref = cempty;
   else if ( canBind(*k) )
   { PC = SUPERVISOR(staticp) + 1;
     VMI_GOTO(S_STATIC);
   } else
     FRAME_FAILED;
-
-  PC += 2;
 
   TRUST_CLAUSE(cref);
 }
@@ -3812,12 +3740,11 @@ processed as part of the supervisor,   notably before creating the first
 choicepoint.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(S_MQUAL, 0, 1, (CA1_VAR))
-{ int arg = (int)*PC++;
-  int rc;
+VMI(S_MQUAL, 0, 1, (CA1_VAR), (v))
+{ int rc;
 
   SAVE_REGISTERS(QID);
-  rc = m_qualify_argument(FR, arg PASS_LD);
+  rc = m_qualify_argument(FR, ARG_VARNUM(v) PASS_LD);
   LOAD_REGISTERS(QID);
   if ( rc != TRUE )
   { if ( rc != FALSE )
@@ -3830,12 +3757,11 @@ VMI(S_MQUAL, 0, 1, (CA1_VAR))
 END_VMI
 
 
-VMI(S_LMQUAL, 0, 1, (CA1_VAR))
-{ int arg = (int)*PC++;
-  int rc;
+VMI(S_LMQUAL, 0, 1, (CA1_VAR), (v))
+{ int rc;
 
   SAVE_REGISTERS(QID);
-  rc = m_qualify_argument(FR, arg PASS_LD);
+  rc = m_qualify_argument(FR, ARG_VARNUM(v) PASS_LD);
   LOAD_REGISTERS(QID);
   if ( rc != TRUE )
   { if ( rc != FALSE )
@@ -3849,13 +3775,13 @@ VMI(S_LMQUAL, 0, 1, (CA1_VAR))
 END_VMI
 
 
-VMI(S_SSU_DET, 0, 0, ())
+VMI(S_SSU_DET, 0, 0, (), ())
 { set(FR, FR_SSU_DET);
   NEXT_INSTRUCTION;
 }
 END_VMI
 
-VMI(S_DET, 0, 0, ())
+VMI(S_DET, 0, 0, (), ())
 { set(FR, FR_DET);
   NEXT_INSTRUCTION;
 }
@@ -3903,7 +3829,7 @@ to give the compiler a hint to put ARGP not into a register.
 A_ENTER: Prepare for arithmetic operations.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(A_ENTER, 0, 0, ())
+VMI(A_ENTER, 0, 0, (), ())
 { AR_BEGIN();
   NEXT_INSTRUCTION;
 }
@@ -3913,10 +3839,10 @@ END_VMI
 A_INTEGER: Push long integer following PC
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(A_INTEGER, 0, 1, (CA1_INTEGER))
+VMI(A_INTEGER, 0, 1, (CA1_INTEGER), (iarg))
 { Number n = allocArithStack(PASS_LD1);
 
-  n->value.i = (intptr_t) *PC++;
+  n->value.i = iarg;
   n->type    = V_INTEGER;
   NEXT_INSTRUCTION;
 }
@@ -3927,11 +3853,11 @@ END_VMI
 A_INT64: Push int64_t following PC
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(A_INT64, 0, WORDS_PER_INT64, (CA1_INT64))
+VMI(A_INT64, 0, WORDS_PER_INT64, (CA1_INT64), (i64ptr))
 { Number n = allocArithStack(PASS_LD1);
   Word p = &n->value.w[0];
 
-  PC = cpInt64Data(&p, PC);
+  cpInt64Data(&p, i64ptr);
   n->type    = V_INTEGER;
   NEXT_INSTRUCTION;
 }
@@ -3942,22 +3868,17 @@ END_VMI
 A_MPZ: Push mpz integer following PC
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(A_MPZ, 0, VM_DYNARGC, (CA1_MPZ))
+VMI(A_MPZ, 0, VM_DYNARGC, (CA1_MPZ), (mpzarg))
 {
 #ifdef O_GMP
   Number n = allocArithStack(PASS_LD1);
-  Word p = (Word)PC+1;				/* skip indirect header */
-  size_t limpsize;
+  Word p = (Word)mpzarg+1;			/* skip indirect header */
   int size = mpz_stack_size(*p++);
 
   n->type = V_MPZ;
   n->value.mpz->_mp_size  = size;
   n->value.mpz->_mp_alloc = 0;	/* avoid de-allocating */
-  limpsize = sizeof(mp_limb_t) * abs(size);
   n->value.mpz->_mp_d = (void*)p;
-
-  p += (limpsize+sizeof(word)-1)/sizeof(word);
-  PC = (Code)p;
 #endif
   NEXT_INSTRUCTION;
 }
@@ -3967,11 +3888,11 @@ END_VMI
 A_MPQ: Push mpq integer following PC
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(A_MPQ, 0, VM_DYNARGC, (CA1_MPQ))
+VMI(A_MPQ, 0, VM_DYNARGC, (CA1_MPQ), (mpqarg))
 {
 #ifdef O_GMP
   Number n = allocArithStack(PASS_LD1);
-  Word p = (Word)PC+1;				/* skip indirect header */
+  Word p = (Word)mpqarg+1;			/* skip indirect header */
   size_t limpsize;
   int num_size = mpq_stack_size(*p++);
   int den_size = mpq_stack_size(*p++);
@@ -3985,11 +3906,7 @@ VMI(A_MPQ, 0, VM_DYNARGC, (CA1_MPQ))
 
   mpq_denref(n->value.mpq)->_mp_size  = den_size;
   mpq_denref(n->value.mpq)->_mp_alloc = 0;	/* avoid de-allocating */
-  limpsize = sizeof(mp_limb_t) * abs(den_size);
   mpq_denref(n->value.mpq)->_mp_d = (void*)p;
-  p += (limpsize+sizeof(word)-1)/sizeof(word);
-
-  PC = (Code)p;
 #endif
   NEXT_INSTRUCTION;
 }
@@ -4000,11 +3917,11 @@ END_VMI
 A_DOUBLE: Push double following PC
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(A_DOUBLE, 0, WORDS_PER_DOUBLE, (CA1_FLOAT))
+VMI(A_DOUBLE, 0, WORDS_PER_DOUBLE, (CA1_FLOAT), (fptr))
 { Number n = allocArithStack(PASS_LD1);
   Word p = &n->value.w[0];
 
-  PC = cpDoubleData(&p, PC);
+  cpDoubleData(&p, fptr);
   n->type       = V_FLOAT;
   NEXT_INSTRUCTION;
 }
@@ -4016,8 +3933,8 @@ A_VAR: Push a variable.  This can be any term
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 
-VMI(A_VAR, 0, 1, (CA1_VAR))
-{ VMH_GOTO(a_var_n, (int)*PC++);
+VMI(A_VAR, 0, 1, (CA1_VAR), (v))
+{ VMH_GOTO(a_var_n, ARG_VARNUM(v));
 }
 END_VMI
 
@@ -4074,17 +3991,17 @@ VMH(a_var_n, 1, (int), (offset))
 }
 END_VMH
 
-VMI(A_VAR0, 0, 0, ())
+VMI(A_VAR0, 0, 0, (), ())
 { VMH_GOTO(a_var_n, VAROFFSET(0));
 }
 END_VMI
 
-VMI(A_VAR1, 0, 0, ())
+VMI(A_VAR1, 0, 0, (), ())
 { VMH_GOTO(a_var_n, VAROFFSET(1));
 }
 END_VMI
 
-VMI(A_VAR2, 0, 0, ())
+VMI(A_VAR2, 0, 0, (), ())
 { VMH_GOTO(a_var_n, VAROFFSET(2));
 }
 END_VMI
@@ -4101,24 +4018,23 @@ TBD: Keep knowledge on #argument in function!
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 
-VMI(A_FUNC0, 0, 1, (CA1_AFUNC))
-{ VMH_GOTO(common_an, *PC++, 0);
+VMI(A_FUNC0, 0, 1, (CA1_AFUNC), (fn))
+{ VMH_GOTO(common_an, fn, 0);
 }
 END_VMI
 
-VMI(A_FUNC1, 0, 1, (CA1_AFUNC))
-{ VMH_GOTO(common_an, *PC++, 1);
+VMI(A_FUNC1, 0, 1, (CA1_AFUNC), (fn))
+{ VMH_GOTO(common_an, fn, 1);
 }
 END_VMI
 
-VMI(A_FUNC2, 0, 1, (CA1_AFUNC))
-{ VMH_GOTO(common_an, *PC++, 2);
+VMI(A_FUNC2, 0, 1, (CA1_AFUNC), (fn))
+{ VMH_GOTO(common_an, fn, 2);
 }
 END_VMI
 
-VMI(A_FUNC, 0, 2, (CA1_AFUNC, CA1_INTEGER))
-{ PC += 2;
-  VMH_GOTO(common_an, PC[-2], (int)PC[-1]);
+VMI(A_FUNC, 0, 2, (CA1_AFUNC, CA1_INTEGER), (fn, an))
+{ VMH_GOTO(common_an, fn, an);
 }
 END_VMI
 
@@ -4134,9 +4050,8 @@ VMH(common_an, 2, (code, int), (fn, an))
 }
 END_VMH
 
-VMI(A_ROUNDTOWARDS_A, 0, 1, (CA1_INTEGER))
-{ int mode = (int)*PC++;
-  Number n = allocArithStack(PASS_LD1);
+VMI(A_ROUNDTOWARDS_A, 0, 1, (CA1_INTEGER), (mode))
+{ Number n = allocArithStack(PASS_LD1);
 
   __PL_ar_ctx.femode = n->value.i = fegetround();
   n->type = V_INTEGER;
@@ -4147,9 +4062,8 @@ VMI(A_ROUNDTOWARDS_A, 0, 1, (CA1_INTEGER))
 END_VMI
 
 
-VMI(A_ROUNDTOWARDS_V, 0, 1, (CA1_VAR))
-{ Word p = varFrameP(FR, (size_t)*PC++);
-  int rm;
+VMI(A_ROUNDTOWARDS_V, 0, 1, (CA1_VAR), (p))
+{ int rm;
 
   deRef(p);
   if ( isAtom(*p) && atom_to_rounding(*p, &rm) )
@@ -4171,7 +4085,7 @@ END_VMI
 A_ADD: Shorthand for A_FUNC2 pl_ar_add()
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(A_ADD, 0, 0, ())
+VMI(A_ADD, 0, 0, (), ())
 { Number argv = argvArithStack(2 PASS_LD);
   int rc;
   number r;
@@ -4194,7 +4108,7 @@ END_VMI
 A_MUL: Shorthand for A_FUNC2 ar_mul()
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(A_MUL, 0, 0, ())
+VMI(A_MUL, 0, 0, (), ())
 { Number argv = argvArithStack(2 PASS_LD);
   int rc;
   number r;
@@ -4219,10 +4133,8 @@ normal variable. This case is very   common,  especially with relatively
 small integers.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(A_ADD_FC, VIF_BREAK, 3, (CA1_FVAR, CA1_VAR, CA1_INTEGER))
-{ Word rp  = varFrameP(FR, *PC++);	/* A = */
-  Word np  = varFrameP(FR, *PC++);	/* B + */
-  intptr_t add = (intptr_t)*PC++;	/* <int> */
+VMI(A_ADD_FC, VIF_BREAK, 3, (CA1_FVAR, CA1_VAR, CA1_INTEGER), (rp, np, add))
+{ /* rp = np + add */
 
   deRef(np);
 
@@ -4230,10 +4142,7 @@ VMI(A_ADD_FC, VIF_BREAK, 3, (CA1_FVAR, CA1_VAR, CA1_INTEGER))
   if ( debugstatus.debugging )
   { Word expr;
 
-    ENSURE_GLOBAL_SPACE(4,
-			{ np = varFrameP(FR, PC[-2]);
-			  rp = varFrameP(FR, PC[-3]);
-			});
+    ENSURE_GLOBAL_SPACE(4, RESTORE_VARS(np, rp));
     expr = gTop;
     gTop += 3;
     expr[0] = FUNCTOR_plus2;
@@ -4266,6 +4175,7 @@ VMI(A_ADD_FC, VIF_BREAK, 3, (CA1_FVAR, CA1_VAR, CA1_INTEGER))
       LOAD_REGISTERS(QID);
       if ( rc != TRUE )
 	THROW_EXCEPTION;
+      RESTORE_VAR(rp);
       *rp = w;
     }
     NEXT_INSTRUCTION;
@@ -4294,7 +4204,7 @@ VMI(A_ADD_FC, VIF_BREAK, 3, (CA1_FVAR, CA1_VAR, CA1_INTEGER))
     if ( !rc )
       THROW_EXCEPTION;
 
-    rp = varFrameP(FR, PC[-3]);		/* may have shifted */
+    RESTORE_VAR(rp);				/* may have shifted */
     *rp = w;
 
     NEXT_INSTRUCTION;
@@ -4338,7 +4248,7 @@ condition.  Example translation: `a(Y) :- b(X), X > Y'
   VMH_GOTO(a_cmp_out, ar_compare(n1, n2, opname))
 
 
-VMI(A_LT, VIF_BREAK, 0, ())		/* A < B */
+VMI(A_LT, VIF_BREAK, 0, (), ())		/* A < B */
 { CMP(LT);
 }
 END_VMI
@@ -4352,27 +4262,27 @@ VMH(a_cmp_out, 1, (int), (rc))
 }
 END_VMH
 
-VMI(A_LE, VIF_BREAK, 0, ())		/* A =< B */
+VMI(A_LE, VIF_BREAK, 0, (), ())		/* A =< B */
 { CMP(LE);
 }
 END_VMI
 
-VMI(A_GT, VIF_BREAK, 0, ())		/* A > B */
+VMI(A_GT, VIF_BREAK, 0, (), ())		/* A > B */
 { CMP(GT);
 }
 END_VMI
 
-VMI(A_GE, VIF_BREAK, 0, ())		/* A >= B */
+VMI(A_GE, VIF_BREAK, 0, (), ())		/* A >= B */
 { CMP(GE);
 }
 END_VMI
 
-VMI(A_EQ, VIF_BREAK, 0, ())		/* A =:= B */
+VMI(A_EQ, VIF_BREAK, 0, (), ())		/* A =:= B */
 { CMP(EQ);
 }
 END_VMI
 
-VMI(A_NE, VIF_BREAK, 0, ())		/* A \=:= B */
+VMI(A_NE, VIF_BREAK, 0, (), ())		/* A \=:= B */
 { CMP(NE);
 }
 END_VMI
@@ -4392,7 +4302,7 @@ for the result (a word) and the number holding the result. For example:
   I_EXIT
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(A_IS, VIF_BREAK, 0, ())		/* A is B */
+VMI(A_IS, VIF_BREAK, 0, (), ())		/* A is B */
 { Number n = argvArithStack(1 PASS_LD);
   Word k;
 
@@ -4486,7 +4396,7 @@ TBD: link with following B_VAR? How  frequent?   Likely  very: we are in
 body mode and in many cases the result is used only once.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(A_FIRSTVAR_IS, VIF_BREAK, 1, (CA1_FVAR)) /* A is B */
+VMI(A_FIRSTVAR_IS, VIF_BREAK, 1, (CA1_FVAR), (p)) /* A is B */
 { Number n = argvArithStack(1 PASS_LD);
   word w;
   int rc;
@@ -4500,7 +4410,8 @@ VMI(A_FIRSTVAR_IS, VIF_BREAK, 1, (CA1_FVAR)) /* A is B */
   AR_END();
 
   if ( rc )
-  { *varFrameP(FR, *PC++) = w;
+  { RESTORE_VAR(p);
+    *p = w;
     NEXT_INSTRUCTION;
   } else
     THROW_EXCEPTION;
@@ -4528,7 +4439,7 @@ END_VMI
 #endif
 
 
-VMI(I_FOPEN, 0, 0, ())
+VMI(I_FOPEN, 0, 0, (), ())
 { FliFrame ffr;
 
 #ifdef O_DEBUGGER
@@ -4569,9 +4480,8 @@ I_FCALLDETVA:  Call  deterministic  foreign    function  using  P_VARARG
 conventions.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(I_FCALLDETVA, 0, 1, (CA1_FOREIGN))
-{ Func f = (Func)*PC++;
-  struct foreign_context context;
+VMI(I_FCALLDETVA, 0, 1, (CA1_FOREIGN), (f))
+{ struct foreign_context context;
   term_t h0 = argFrameP(FR, 0) - (Word)lBase;
 
   context.context   = 0L;
@@ -4590,81 +4500,78 @@ I_FCALLDET0 .. I_FCALLDET10: Call deterministic   foreign function using
 a1, a2, ... calling conventions.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(I_FCALLDET0, 0, 1, (CA1_FOREIGN))
-{ Func f = (Func)*PC++;
-
-  PROF_FOREIGN;
+VMI(I_FCALLDET0, 0, 1, (CA1_FOREIGN), (f))
+{ PROF_FOREIGN;
   VMH_GOTO_AS_VMI(I_FEXITDET, (*f)());
 }
 END_VMI
 
 #define FCALL_DETN(h0_args...) \
-  Func f = (Func)*PC++; \
   term_t h0 = argFrameP(FR, 0) - (Word)lBase;\
   PROF_FOREIGN; \
   VMH_GOTO_AS_VMI(I_FEXITDET, (*f)(h0_args));
 
-VMI(I_FCALLDET1, 0, 1, (CA1_FOREIGN))
+VMI(I_FCALLDET1, 0, 1, (CA1_FOREIGN), (f))
 { FCALL_DETN(h0);
 }
 END_VMI
 
 
-VMI(I_FCALLDET2, 0, 1, (CA1_FOREIGN))
+VMI(I_FCALLDET2, 0, 1, (CA1_FOREIGN), (f))
 { FCALL_DETN(h0, h0+1);
 }
 END_VMI
 
 
-VMI(I_FCALLDET3, 0, 1, (CA1_FOREIGN))
+VMI(I_FCALLDET3, 0, 1, (CA1_FOREIGN), (f))
 { FCALL_DETN(h0, h0+1, h0+2);
 }
 END_VMI
 
 
-VMI(I_FCALLDET4, 0, 1, (CA1_FOREIGN))
+VMI(I_FCALLDET4, 0, 1, (CA1_FOREIGN), (f))
 { FCALL_DETN(h0, h0+1, h0+2, h0+3);
 }
 END_VMI
 
 
-VMI(I_FCALLDET5, 0, 1, (CA1_FOREIGN))
+VMI(I_FCALLDET5, 0, 1, (CA1_FOREIGN), (f))
 { FCALL_DETN(h0, h0+1, h0+2, h0+3, h0+4);
 }
 END_VMI
 
 
-VMI(I_FCALLDET6, 0, 1, (CA1_FOREIGN))
+VMI(I_FCALLDET6, 0, 1, (CA1_FOREIGN), (f))
 { FCALL_DETN(h0, h0+1, h0+2, h0+3, h0+4, h0+5);
 }
 END_VMI
 
 
-VMI(I_FCALLDET7, 0, 1, (CA1_FOREIGN))
+VMI(I_FCALLDET7, 0, 1, (CA1_FOREIGN), (f))
 { FCALL_DETN(h0, h0+1, h0+2, h0+3, h0+4, h0+5, h0+6);
 }
 END_VMI
 
 
-VMI(I_FCALLDET8, 0, 1, (CA1_FOREIGN))
+VMI(I_FCALLDET8, 0, 1, (CA1_FOREIGN), (f))
 { FCALL_DETN(h0, h0+1, h0+2, h0+3, h0+4, h0+5, h0+6, h0+7);
 }
 END_VMI
 
 
-VMI(I_FCALLDET9, 0, 1, (CA1_FOREIGN))
+VMI(I_FCALLDET9, 0, 1, (CA1_FOREIGN), (f))
 { FCALL_DETN(h0, h0+1, h0+2, h0+3, h0+4, h0+5, h0+6, h0+7, h0+8);
 }
 END_VMI
 
 
-VMI(I_FCALLDET10, 0, 1, (CA1_FOREIGN))
+VMI(I_FCALLDET10, 0, 1, (CA1_FOREIGN), (f))
 { FCALL_DETN(h0, h0+1, h0+2, h0+3, h0+4, h0+5, h0+6, h0+7, h0+8, h0+9);
 }
 END_VMI
 
 
-VMI(I_FEXITDET, 0, 0, ())
+VMI(I_FEXITDET, 0, 0, (), ())
 { THROW_EXCEPTION; /* probably should never happen?? */
 }
 END_VMI
@@ -4715,7 +4622,7 @@ take it to I_FREDO. I_FREDO updates the context structure and jumps back
 to the I_FCALLNDETVA (PC -= 4);
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(I_FOPENNDET, 0, 0, ())
+VMI(I_FOPENNDET, 0, 0, (), ())
 { FNDET_CONTEXT.context   = 0L;
   FNDET_CONTEXT.engine    = LD;
   FNDET_CONTEXT.control   = FRG_FIRST_CALL;
@@ -4748,9 +4655,8 @@ VMH(foreign_redo, 0, (), ())
 END_VMH
 
 
-VMI(I_FCALLNDETVA, 0, 1, (CA1_FOREIGN))
-{ Func f = (Func)*PC++;
-  term_t h0 = argFrameP(FR, 0) - (Word)lBase;
+VMI(I_FCALLNDETVA, 0, 1, (CA1_FOREIGN), (f))
+{ term_t h0 = argFrameP(FR, 0) - (Word)lBase;
 
   PROF_FOREIGN;
   VMH_GOTO_AS_VMI(I_FEXITNDET, (*f)(h0, DEF->functor->arity, &FNDET_CONTEXT));
@@ -4758,82 +4664,79 @@ VMI(I_FCALLNDETVA, 0, 1, (CA1_FOREIGN))
 END_VMI
 
 
-VMI(I_FCALLNDET0, 0, 1, (CA1_FOREIGN))
-{ Func f = (Func)*PC++;
-
-  PROF_FOREIGN;
+VMI(I_FCALLNDET0, 0, 1, (CA1_FOREIGN), (f))
+{ PROF_FOREIGN;
   VMH_GOTO_AS_VMI(I_FEXITNDET, (*f)(&FNDET_CONTEXT));
 }
 END_VMI
 
 #define FCALL_NDETN(h0_args...) \
-  Func f = (Func)*PC++; \
   term_t h0 = argFrameP(FR, 0) - (Word)lBase;\
   PROF_FOREIGN; \
   VMH_GOTO_AS_VMI(I_FEXITNDET, (*f)(h0_args, &FNDET_CONTEXT));
 
 
-VMI(I_FCALLNDET1, 0, 1, (CA1_FOREIGN))
+VMI(I_FCALLNDET1, 0, 1, (CA1_FOREIGN), (f))
 { FCALL_NDETN(h0);
 }
 END_VMI
 
 
-VMI(I_FCALLNDET2, 0, 1, (CA1_FOREIGN))
+VMI(I_FCALLNDET2, 0, 1, (CA1_FOREIGN), (f))
 { FCALL_NDETN(h0, h0+1);
 }
 END_VMI
 
 
-VMI(I_FCALLNDET3, 0, 1, (CA1_FOREIGN))
+VMI(I_FCALLNDET3, 0, 1, (CA1_FOREIGN), (f))
 { FCALL_NDETN(h0, h0+1, h0+2);
 }
 END_VMI
 
 
-VMI(I_FCALLNDET4, 0, 1, (CA1_FOREIGN))
+VMI(I_FCALLNDET4, 0, 1, (CA1_FOREIGN), (f))
 { FCALL_NDETN(h0, h0+1, h0+2, h0+3);
 }
 END_VMI
 
 
-VMI(I_FCALLNDET5, 0, 1, (CA1_FOREIGN))
+VMI(I_FCALLNDET5, 0, 1, (CA1_FOREIGN), (f))
 { FCALL_NDETN(h0, h0+1, h0+2, h0+3, h0+4);
 }
 END_VMI
 
 
-VMI(I_FCALLNDET6, 0, 1, (CA1_FOREIGN))
+VMI(I_FCALLNDET6, 0, 1, (CA1_FOREIGN), (f))
 { FCALL_NDETN(h0, h0+1, h0+2, h0+3, h0+4, h0+5);
 }
 END_VMI
 
 
-VMI(I_FCALLNDET7, 0, 1, (CA1_FOREIGN))
+VMI(I_FCALLNDET7, 0, 1, (CA1_FOREIGN), (f))
 { FCALL_NDETN(h0, h0+1, h0+2, h0+3, h0+4, h0+5, h0+6);
 }
 END_VMI
 
 
-VMI(I_FCALLNDET8, 0, 1, (CA1_FOREIGN))
+VMI(I_FCALLNDET8, 0, 1, (CA1_FOREIGN), (f))
 { FCALL_NDETN(h0, h0+1, h0+2, h0+3, h0+4, h0+5, h0+6, h0+7);
 }
 END_VMI
 
 
-VMI(I_FCALLNDET9, 0, 1, (CA1_FOREIGN))
+VMI(I_FCALLNDET9, 0, 1, (CA1_FOREIGN), (f))
 { FCALL_NDETN(h0, h0+1, h0+2, h0+3, h0+4, h0+5, h0+6, h0+7, h0+8);
 }
 END_VMI
 
 
-VMI(I_FCALLNDET10, 0, 1, (CA1_FOREIGN))
+VMI(I_FCALLNDET10, 0, 1, (CA1_FOREIGN), (f))
 { FCALL_NDETN(h0, h0+1, h0+2, h0+3, h0+4, h0+5, h0+6, h0+7, h0+8, h0+9);
 }
 END_VMI
 
 
-VMI(I_FEXITNDET, 0, 0, ())
+VMI(I_FEXITNDET, 0, 0, (), ())
 { THROW_EXCEPTION;
 }
 END_VMI
@@ -4888,7 +4791,7 @@ VMH(I_FEXITNDET, 1, (intptr_t), (rc))
 }
 END_VMH
 
-VMI(I_FREDO, 0, 0, ())
+VMI(I_FREDO, 0, 0, (), ())
 { if ( is_signalled(PASS_LD1) )
   { SAVE_REGISTERS(QID);
     handleSignals(PASS_LD1);
@@ -4932,7 +4835,7 @@ is tranalated into
 We set FR_WATCHED to get a cleanup call if the frame fails or is cutted.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(I_CALLCLEANUP, 0, 0, ())
+VMI(I_CALLCLEANUP, 0, 0, (), ())
 { Word p;
 
   if ( !mustBeCallable(consTermRef(argFrameP(FR, 3)) PASS_LD) )
@@ -4960,7 +4863,7 @@ END_VMI
    anyway: it runs, but is *much* slower than the switch.
 */
 
-VMI(I_EXITCLEANUP, 0, 0, ())
+VMI(I_EXITCLEANUP, 0, 0, (), ())
 {
 #if defined(__llvm__) && defined(VMCODE_IS_ADDRESS) /* (*) */
   extern int llvm_dummy(void);
@@ -5006,7 +4909,7 @@ which is translated to:
   I_EXITCATCH
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(I_CATCH, 0, 0, ())
+VMI(I_CATCH, 0, 0, (), ())
 { Word p = argFrameP(FR, 0);
 
   if ( BFR->frame == FR && BFR == (Choice)argFrameP(FR, 3) )
@@ -5026,7 +4929,7 @@ VMI(I_CATCH, 0, 0, ())
 END_VMI
 
 
-VMI(I_EXITCATCH, 0, 0, ())
+VMI(I_EXITCATCH, 0, 0, (), ())
 { if ( BFR->frame == FR && BFR == (Choice)argFrameP(FR, 3) )
   { assert(BFR->type == CHP_CATCH);
     BFR = BFR->parent;
@@ -5075,7 +4978,7 @@ inference count to make sure that the  time   we  run  out of memory the
 system will actually consider GC. See considerGarbageCollect().
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(B_THROW, 0, 0, ())
+VMI(B_THROW, 0, 0, (), ())
 { PL_raise_exception(argFrameP(lTop, 0) - (Word)lBase);
   THROW_EXCEPTION;				/* sets origin */
 }
@@ -5444,29 +5347,22 @@ I_CALLATM: procedure-module, context-module, procedure
 The procedure-module is provided to support the decompiler.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(I_CALLATM, VIF_BREAK, 3, (CA1_MODULE, CA1_MODULE, CA1_PROC))
-{ PC++;
-  VMI_GOTO(I_CALLM);
+VMI(I_CALLATM, VIF_BREAK, 3, (CA1_MODULE, CA1_MODULE, CA1_PROC), (pmod, cmod, proc))
+{ VMI_GOTO(I_CALLM, cmod, proc);
+  MARK_USED(pmod);
 }
 END_VMI
 
-VMI(I_DEPARTATMV, VIF_BREAK, 3, (CA1_MODULE, CA1_VAR, CA1_PROC))
+VMI(I_DEPARTATMV, VIF_BREAK, 3, (CA1_MODULE, CA1_VAR, CA1_PROC), (pmod, ap, proc))
 { if ( (void *)BFR > (void *)FR || !truePrologFlag(PLFLAG_LASTCALL) )
-  { VMI_GOTO(I_CALLATMV);
+  { VMI_GOTO(I_CALLATMV, pmod, ap, proc);
   } else
-  { Word ap;
-    int iv;
-
-    PC++;
-    iv = (int)*PC++;
-
-    ap = varFrameP(FR, iv);
-    deRef(ap);
+  { deRef(ap);
     if ( isTextAtom(*ap) )
     { Module m = lookupModule(*ap);
 
       setContextModule(FR, m);
-      VMI_GOTO(I_DEPART);
+      VMI_GOTO(I_DEPART, proc);
     } else
     { PL_error(NULL, 0, NULL, ERR_TYPE, ATOM_module,
 	       pushWordAsTermRef(ap));
@@ -5483,17 +5379,8 @@ This instruction deals with  @(Callable,  Module),   where  Module  is a
 variable. The module argument can be NULL.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(I_CALLATMV, VIF_BREAK, 3, (CA1_MODULE, CA1_VAR, CA1_PROC))
-{ Word ap;
-  int iv;
-  Procedure proc;
-
-  PC++;
-  iv = (int)*PC++;
-  proc = (Procedure)*PC++;
-
-  ap = varFrameP(FR, iv);
-  deRef(ap);
+VMI(I_CALLATMV, VIF_BREAK, 3, (CA1_MODULE, CA1_VAR, CA1_PROC), (pmod, ap, proc))
+{ deRef(ap);
   if ( isTextAtom(*ap) )
   { Module module = lookupModule(*ap);
     DEF = proc->definition;
@@ -5506,6 +5393,7 @@ VMI(I_CALLATMV, VIF_BREAK, 3, (CA1_MODULE, CA1_VAR, CA1_PROC))
     popTermRef();
     THROW_EXCEPTION;
   }
+  MARK_USED(pmod);
 }
 END_VMI
 
@@ -5517,9 +5405,8 @@ the context module for calling a transparent  procedure. This job is the
 same as the end of I_USERCALL
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(I_CALLM, VIF_BREAK, 2, (CA1_MODULE, CA1_PROC))
-{ Module module = (Module)*PC++;
-  DEF    = ((Procedure)*PC++)->definition;
+VMI(I_CALLM, VIF_BREAK, 2, (CA1_MODULE, CA1_PROC), (module, proc))
+{ DEF    = proc->definition;
   NFR = lTop;
 
   VMH_GOTO(mcall_cont, module);
@@ -5539,7 +5426,7 @@ It also is responsible of filling the   argument part of the environment
 frame with the arguments of the term.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(I_USERCALL0, VIF_BREAK, 0, ())
+VMI(I_USERCALL0, VIF_BREAK, 0, (), ())
 { Word a;
 
   NFR = lTop;
@@ -5771,9 +5658,8 @@ END_VMH
 I_USERCALLN: translation of call(Goal, Arg1, ...)
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(I_USERCALLN, VIF_BREAK, 1, (CA1_INTEGER))
+VMI(I_USERCALLN, VIF_BREAK, 1, (CA1_INTEGER), (callargs))
 { Word a;
-  int callargs = (int)*PC++;
 
   NFR = lTop;
   a = argFrameP(NFR, 0);		/* get the (now) instantiated */
@@ -5836,7 +5722,7 @@ Where '$reset' maps to
 
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(I_RESET, 0, 0, ())
+VMI(I_RESET, 0, 0, (), ())
 { Word p = argFrameP(FR, 0);
 
   if ( isVar(*p) )
@@ -5851,7 +5737,7 @@ VMI(I_RESET, 0, 0, ())
 END_VMI
 
 
-VMI(I_EXITRESET, 0, 0, ())
+VMI(I_EXITRESET, 0, 0, (), ())
 { Word p = argFrameP(FR, 2);
 
   deRef(p);
@@ -5874,10 +5760,8 @@ END_VMI
 $call_continuation(Cont)
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(I_CALLCONT, 0, 1, (CA1_VAR))
-{ Word cp = varFrameP(FR, (int)*PC++);
-
-  deRef(cp);
+VMI(I_CALLCONT, 0, 1, (CA1_VAR), (cp))
+{ deRef(cp);
   if ( hasFunctor(*cp, FUNCTOR_call1) )
   { *ARGP++ = linkValI(argTermP(*cp, 0));
     VMI_GOTO(I_USERCALL0);
@@ -5909,18 +5793,16 @@ shift(Ball) :-
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 
-VMI(I_SHIFT, 0, 1, (CA1_VAR))
-{ VMH_GOTO(shift_common, FALSE);
+VMI(I_SHIFT, 0, 1, (CA1_VAR), (ballp))
+{ VMH_GOTO(shift_common, ballp, FALSE);
 }
 END_VMI
 
-VMH(shift_common, 1, (int), (shift_for_copy))
-{ Word ballp;
-  term_t ball;
+VMH(shift_common, 2, (Word, int), (ballp, shift_for_copy))
+{ term_t ball;
   Code pc;
   fid_t fid;
 
-  ballp = varFrameP(FR, (int)*PC++);
   ball  = pushWordAsTermRef(ballp);
 
   SAVE_REGISTERS(QID);
@@ -5943,8 +5825,8 @@ VMH(shift_common, 1, (int), (shift_for_copy))
 }
 END_VMH
 
-VMI(I_SHIFTCP, 0, 1, (CA1_VAR))
-{ VMH_GOTO(shift_common, TRUE);
+VMI(I_SHIFTCP, 0, 1, (CA1_VAR), (ballp))
+{ VMH_GOTO(shift_common, ballp, TRUE);
 }
 END_VMI
 
@@ -5966,7 +5848,7 @@ trie clause or `fail` to express the  trie   is  empty.  This is used to
 achieve thread-safe deletion of answer tries.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-VMI(S_TRIE_GEN, 0, 0, ())
+VMI(S_TRIE_GEN, 0, 0, (), ())
 { Word tp = argFrameP(FR, 0);
   atom_t dbref;
   ClauseRef cref;
@@ -6043,13 +5925,13 @@ TBD:
 		         : argTermP(*TrieTermP, valInt(*TrieOffset)-1))
 #define TrieArgStackP argFrameP(FR, TRIE_ARGS+2)
 #define TrieVarP(n)   argFrameP(FR, (TRIE_VAR_OFFSET-1+(n)))
-#define TRIE_TRY \
+#define TRIE_TRY(skip, tryvmi, ...) \
 	do \
-	{ intptr_t skip = *PC++;			     \
-          Choice ch;					     \
+	{ Choice ch;					     \
 	  ENSURE_LOCAL_SPACE(sizeof(*ch), THROW_EXCEPTION);  \
 	  ch = newChoice(CHP_JUMP, FR PASS_LD);		     \
-	  ch->value.pc = PC+skip;			     \
+	  ch->value.pc = PC-TOTAL_ARGSIZE(__VA_ARGS__)+skip; \
+	  VMI_GOTO(tryvmi, ## __VA_ARGS__);		     \
 	} while(0)
 #define TrieNextArg() \
 	do \
@@ -6095,7 +5977,7 @@ TBD:
 	  }					\
 	} while(0)
 
-VMI(T_TRIE_GEN2, 0, 0, ())
+VMI(T_TRIE_GEN2, 0, 0, (), ())
 { Word ap;
   size_t nvars = FR->clause->value.clause->prolog_vars - TRIE_VAR_OFFSET;
 
@@ -6126,7 +6008,7 @@ VMI(T_TRIE_GEN2, 0, 0, ())
 }
 END_VMI
 
-VMI(T_TRIE_GEN3, 0, 0, ())
+VMI(T_TRIE_GEN3, 0, 0, (), ())
 { Word ap;
   size_t nvars = FR->clause->value.clause->prolog_vars - TRIE_VAR_OFFSET;
 
@@ -6159,7 +6041,7 @@ VMI(T_TRIE_GEN3, 0, 0, ())
 END_VMI
 
 
-VMI(T_VALUE, 0, 0, ())
+VMI(T_VALUE, 0, 0, (), ())
 { ENSURE_GLOBAL_SPACE(0, (void)0);	/* allows for 3 trailed assignments */
 
   TrailAssignment(TrieOffset);
@@ -6170,9 +6052,8 @@ VMI(T_VALUE, 0, 0, ())
 }
 END_VMI
 
-VMI(T_DELAY, 0, 1, (CA1_TRIE_NODE))
-{ trie_node *answer = (trie_node*)*PC++;
-  atom_t atrie;
+VMI(T_DELAY, 0, 1, (CA1_TRIE_NODE), (answer))
+{ atom_t atrie;
 
   ENSURE_STACK_SPACE(16, 12, (void)0);
   UnwindTrieArgP();
@@ -6189,14 +6070,12 @@ VMI(T_DELAY, 0, 1, (CA1_TRIE_NODE))
 }
 END_VMI
 
-VMI(T_TRY_FUNCTOR, 0, 2, (CA1_JUMP,CA1_FUNC))
-{ TRIE_TRY;
-  VMI_GOTO(T_FUNCTOR);
+VMI(T_TRY_FUNCTOR, 0, 2, (CA1_JUMP,CA1_FUNC), (skip, f))
+{ TRIE_TRY(skip, T_FUNCTOR, f);
 }
 END_VMI
-VMI(T_FUNCTOR, 0, 1, (CA1_FUNC))
-{ functor_t f = (functor_t) *PC++;
-  Word p;
+VMI(T_FUNCTOR, 0, 1, (CA1_FUNC), (f))
+{ Word p;
 
   DEBUG(1, checkStacks(NULL));
 
@@ -6253,7 +6132,7 @@ VMI(T_FUNCTOR, 0, 1, (CA1_FUNC))
 }
 END_VMI
 
-VMI(T_POP, 0, 0, ())
+VMI(T_POP, 0, 0, (), ())
 { ENSURE_GLOBAL_SPACE(0, (void)0);	/* allows for 3 trailed assignments */
   TrailAssignment(TrieTermP);
   TrailAssignment(TrieOffset);
@@ -6265,10 +6144,8 @@ VMI(T_POP, 0, 0, ())
 }
 END_VMI
 
-VMI(T_POPN, 0, 1, (CA1_INTEGER))
-{ intptr_t n = (intptr_t)*PC++;
-
-  ENSURE_GLOBAL_SPACE(0, (void)0);
+VMI(T_POPN, 0, 1, (CA1_INTEGER), (n))
+{ ENSURE_GLOBAL_SPACE(0, (void)0);
   TrailAssignment(TrieTermP);
   TrailAssignment(TrieOffset);
   TrailAssignment(TrieArgStackP);
@@ -6287,14 +6164,12 @@ VMI(T_POPN, 0, 1, (CA1_INTEGER))
 }
 END_VMI
 
-VMI(T_TRY_VAR, 0, 2, (CA1_JUMP,CA1_INTEGER))
-{ TRIE_TRY;
-  VMI_GOTO(T_VAR);
+VMI(T_TRY_VAR, 0, 2, (CA1_JUMP,CA1_INTEGER), (skip, offset))
+{ TRIE_TRY(skip, T_VAR, offset);
 }
 END_VMI
-VMI(T_VAR, 0, 1, (CA1_INTEGER))
-{ intptr_t offset = (intptr_t)*PC++;		/* offset = 1.. */
-  Word vp = TrieVarP(offset);
+VMI(T_VAR, 0, 1, (CA1_INTEGER), (offset))	/* offset = 1.. */
+{ Word vp = TrieVarP(offset);
 
   DEBUG(MSG_TRIE_VM,
 	{ Sdprintf("VAR: %lld: ", offset);
@@ -6332,12 +6207,11 @@ VMI(T_VAR, 0, 1, (CA1_INTEGER))
 END_VMI
 
 
-VMI(T_TRY_INTEGER, 0, 2, (CA1_JUMP,CA1_INTEGER))
-{ TRIE_TRY;
-  VMI_GOTO(T_INTEGER);
+VMI(T_TRY_INTEGER, 0, 2, (CA1_JUMP,CA1_INTEGER), (skip, iarg))
+{ TRIE_TRY(skip, T_INTEGER, iarg);
 }
 END_VMI
-VMI(T_INTEGER, 0, 1, (CA1_INTEGER))
+VMI(T_INTEGER, 0, 1, (CA1_INTEGER), (iarg))
 { Word k;
 
   deRef2(TrieCurrentP, k);
@@ -6355,7 +6229,7 @@ VMI(T_INTEGER, 0, 1, (CA1_INTEGER))
     gTop += 2+WORDS_PER_INT64;
     c = consPtr(p, TAG_INTEGER|STG_GLOBAL);
 
-    cvt.val = (int64_t)(intptr_t)*PC++;
+    cvt.val = (int64_t)iarg;
     *p++ = mkIndHdr(WORDS_PER_INT64, TAG_INTEGER);
     vp = cpInt64Data(&p, vp);
     *p = mkIndHdr(WORDS_PER_INT64, TAG_INTEGER);
@@ -6363,7 +6237,7 @@ VMI(T_INTEGER, 0, 1, (CA1_INTEGER))
     bindConst(k, c);
     TrieNextArg();
     NEXT_INSTRUCTION;
-  } else if ( isBignum(*k) && valBignum(*k) == (intptr_t)*PC++ )
+  } else if ( isBignum(*k) && valBignum(*k) == iarg )
   { TrieNextArg();
     NEXT_INSTRUCTION;
   }
@@ -6372,12 +6246,11 @@ VMI(T_INTEGER, 0, 1, (CA1_INTEGER))
 }
 END_VMI
 
-VMI(T_TRY_INT64, 0, 1+WORDS_PER_INT64, (CA1_JUMP,CA1_INT64))
-{ TRIE_TRY;
-  VMI_GOTO(T_INT64);
+VMI(T_TRY_INT64, 0, 1+WORDS_PER_INT64, (CA1_JUMP,CA1_INT64), (skip, i64ptr))
+{ TRIE_TRY(skip, T_INT64, i64ptr);
 }
 END_VMI
-VMI(T_INT64, 0, WORDS_PER_INT64, (CA1_INT64))
+VMI(T_INT64, 0, WORDS_PER_INT64, (CA1_INT64), (i64ptr))
 { Word k;
 
   deRef2(TrieCurrentP, k);
@@ -6391,7 +6264,7 @@ VMI(T_INT64, 0, WORDS_PER_INT64, (CA1_INT64))
     c = consPtr(p, TAG_INTEGER|STG_GLOBAL);
 
     *p++ = mkIndHdr(WORDS_PER_INT64, TAG_INTEGER);
-    PC = cpInt64Data(&p, PC);
+    cpInt64Data(&p, i64ptr);
     *p = mkIndHdr(WORDS_PER_INT64, TAG_INTEGER);
 
     bindConst(k, c);
@@ -6402,7 +6275,7 @@ VMI(T_INT64, 0, WORDS_PER_INT64, (CA1_INT64))
     size_t i;
 
     for(i=0; i<WORDS_PER_INT64; i++)
-    { if ( *vk++ != (word)*PC++ )
+    { if ( *vk++ != *i64ptr++ )
 	CLAUSE_FAILED;
     }
     TrieNextArg();
@@ -6413,12 +6286,11 @@ VMI(T_INT64, 0, WORDS_PER_INT64, (CA1_INT64))
 }
 END_VMI
 
-VMI(T_TRY_FLOAT, 0, 1+WORDS_PER_DOUBLE, (CA1_JUMP,CA1_FLOAT))
-{ TRIE_TRY;
-  VMI_GOTO(T_FLOAT);
+VMI(T_TRY_FLOAT, 0, 1+WORDS_PER_DOUBLE, (CA1_JUMP,CA1_FLOAT), (skip, fptr))
+{ TRIE_TRY(skip, T_FLOAT, fptr);
 }
 END_VMI
-VMI(T_FLOAT, 0, WORDS_PER_DOUBLE, (CA1_FLOAT))
+VMI(T_FLOAT, 0, WORDS_PER_DOUBLE, (CA1_FLOAT), (fptr))
 { Word k;
 
   deRef2(TrieCurrentP, k);
@@ -6432,7 +6304,7 @@ VMI(T_FLOAT, 0, WORDS_PER_DOUBLE, (CA1_FLOAT))
     c = consPtr(p, TAG_FLOAT|STG_GLOBAL);
 
     *p++ = mkIndHdr(WORDS_PER_DOUBLE, TAG_FLOAT);
-    PC = cpDoubleData(&p, PC);
+    cpDoubleData(&p, fptr);
     *p++ = mkIndHdr(WORDS_PER_DOUBLE, TAG_FLOAT);
 
     bindConst(k, c);
@@ -6443,10 +6315,10 @@ VMI(T_FLOAT, 0, WORDS_PER_DOUBLE, (CA1_FLOAT))
 
     switch(WORDS_PER_DOUBLE) /* depend on compiler to clean up */
     { case 2:
-	if ( *p++ != *PC++ )
+	if ( *p++ != (*fptr++) )
 	  CLAUSE_FAILED;
       case 1:
-	if ( *p++ == *PC++ )
+	if ( *p++ == *fptr++ )
 	{ TrieNextArg();
 	  NEXT_INSTRUCTION;
 	}
@@ -6461,40 +6333,36 @@ VMI(T_FLOAT, 0, WORDS_PER_DOUBLE, (CA1_FLOAT))
 END_VMI
 
 
-VMI(T_TRY_MPZ, 0, VM_DYNARGC, (CA1_JUMP,CA1_MPZ))
-{ TRIE_TRY;
-  VMI_GOTO(T_MPZ);
+VMI(T_TRY_MPZ, 0, VM_DYNARGC, (CA1_JUMP,CA1_MPZ), (skip, mpzarg))
+{ TRIE_TRY(skip, T_MPZ, mpzarg);
 }
 END_VMI
-VMI(T_MPZ, 0, VM_DYNARGC, (CA1_MPZ))
+VMI(T_MPZ, 0, VM_DYNARGC, (CA1_MPZ), (mpzarg))
 { SEPARATE_VMI;
-  VMI_GOTO(T_STRING);
+  VMI_GOTO(T_STRING, mpzarg);
 }
 END_VMI
 
-VMI(T_TRY_STRING, 0, VM_DYNARGC, (CA1_JUMP,CA1_STRING))
-{ TRIE_TRY;
-  VMI_GOTO(T_STRING);
+VMI(T_TRY_STRING, 0, VM_DYNARGC, (CA1_JUMP,CA1_STRING), (skip, strarg))
+{ TRIE_TRY(skip, T_STRING, strarg);
 }
 END_VMI
-VMI(T_STRING, 0, VM_DYNARGC, (CA1_STRING))
+VMI(T_STRING, 0, VM_DYNARGC, (CA1_STRING), (strarg))
 { Word k;
 
   deRef2(TrieCurrentP, k);
   if ( canBind(*k) )
-  { size_t sz = gsizeIndirectFromCode(PC);
+  { size_t sz = ARG_WSIZE(strarg) + 1; /* global stack has additional word on end */
 
     ENSURE_GLOBAL_SPACE(sz, deRef2(TrieCurrentP, k));
-    struct word_and_Code retval = VM_globalIndirectFromCode(PC PASS_LD);
-    PC = retval.code;
+    struct word_and_Code retval = VM_globalIndirectFromCode(strarg PASS_LD);
     bindConst(k, retval.word);
     TrieNextArg();
     NEXT_INSTRUCTION;
   } else if ( isIndirect(*k) )
-  { struct word_and_Code retval = VM_equalIndirectFromCode(*k, PC PASS_LD);
+  { struct word_and_Code retval = VM_equalIndirectFromCode(*k, strarg PASS_LD);
     if ( retval.word )
-    { PC = retval.code;
-      TrieNextArg();
+    { TrieNextArg();
       NEXT_INSTRUCTION;
     }
   }
@@ -6504,29 +6372,25 @@ VMI(T_STRING, 0, VM_DYNARGC, (CA1_STRING))
 END_VMI
 
 
-VMI(T_TRY_ATOM, 0, 2, (CA1_JUMP,CA1_DATA))
-{ TRIE_TRY;
-  VMI_GOTO(T_ATOM);
+VMI(T_TRY_ATOM, 0, 2, (CA1_JUMP,CA1_DATA), (skip, c))
+{ TRIE_TRY(skip, T_ATOM, c);
 }
 END_VMI
 
-VMI(T_ATOM, 0, 1, (CA1_DATA))
-{ word c = (word)*PC++;
-  DEBUG(MSG_TRIE_VM, Sdprintf("T_ATOM %s\n", PL_atom_chars(c)));
+VMI(T_ATOM, 0, 1, (CA1_DATA), (c))
+{ DEBUG(MSG_TRIE_VM, Sdprintf("T_ATOM %s\n", PL_atom_chars(c)));
   pushVolatileAtom(c);
   VMH_GOTO(t_const, c);
 }
 END_VMI
 
-VMI(T_TRY_SMALLINT, 0, 2, (CA1_JUMP,CA1_DATA))
-{ TRIE_TRY;
-  VMI_GOTO(T_SMALLINT);
+VMI(T_TRY_SMALLINT, 0, 2, (CA1_JUMP,CA1_DATA), (skip, c))
+{ TRIE_TRY(skip, T_SMALLINT, c);
 }
 END_VMI
 
-VMI(T_SMALLINT, 0, 1, (CA1_DATA))
-{ word c = (word)*PC++;
-  DEBUG(MSG_TRIE_VM, Sdprintf("T_SMALLINT %lld\n", valInt(c)));
+VMI(T_SMALLINT, 0, 1, (CA1_DATA), (c))
+{ DEBUG(MSG_TRIE_VM, Sdprintf("T_SMALLINT %lld\n", valInt(c)));
   VMH_GOTO(t_const, c);
 }
 END_VMI

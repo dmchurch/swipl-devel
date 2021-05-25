@@ -15,13 +15,14 @@
  * FOREACH_VMH_CALL(sep,f,...) f(wakeup,...) sep() f(retry,...) sep() f(h_const,...) sep() ...
  * 
  * Per-instruction defines, assuming the following in pl-vmi.c:
- *   VMI(INSTR_NAME, I_FLAGS, 2, (CA1_ARGTYPE,CA1_ARGTYPE))
+ *   VMI(INSTR_NAME, I_FLAGS, 2, (CA1_ARGTYPE,CA1_ARGTYPE), (arg1name, arg2name))
  * 
  * VMLCASE_INSTR_NAME instr_name
- * VMIDECL_INSTR_NAME INSTR_NAME, I_FLAGS, 2, (CA1_ARGTYPE,CA1_ARGTYPE)
+ * VMIDECL_INSTR_NAME INSTR_NAME, I_FLAGS, 2, (CA1_ARGTYPE,CA1_ARGTYPE), (arg1name, arg2name)
  * VMIFLAGS_INSTR_NAME I_FLAGS
  * VMIARGCOUNT_INSTR_NAME 2
  * VMIARGTYPES_INSTR_NAME CA1_ARGTYPE,CA1_ARGTYPE
+ * VMIARGNAMES_INSTR_NAME arg1name, arg2name
  * 
  * Per-helper defines, assuming the following:
  *   VMH(helper_name, 2, (int, Code), (n, p))
@@ -41,6 +42,7 @@
 #define VMI_FLAGS(n)	VMIFLAGS_ ## n
 #define VMI_ARGCOUNT(n)	VMIARGCOUNT_ ## n
 #define VMI_ARGTYPES(n)	VMIARGTYPES_ ## n
+#define VMI_ARGNAMES(n)	VMIARGNAMES_ ## n
 
 #define VMH_DECL(n)	VMHDECL_ ## n
 #define VMH_NAME(n)	n

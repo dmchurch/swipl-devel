@@ -2945,9 +2945,10 @@ typedef struct register_file
  * a mismatch of VMI..END_VMH or VMH..END_VMI.
  */
 #define assert_exists(var, message) (void)(var)
-#define VMI(Name,f,na,a)	_VMI_DECLARATION(Name,f,na,a) \
+#define VMI(Name,f,na,a,an)	_VMI_DECLARATION(Name,f,na,a,an) \
 				{ int __is_vmi = 1; \
-				  { _VMI_PROLOGUE(Name,f,na,a); VMI_ENTER(Name)
+				  { _VMI_PROLOGUE(Name,f,na,a,an); VMI_ENTER(Name); \
+				    _VMI_PROCESS_ARGS(Name,f,na,a,an);
 #define END_VMI			    _VMI_EPILOGUE \
 				  } \
 				  assert_exists(__is_vmi, "END_VMI used without VMI!"); \
@@ -2960,14 +2961,14 @@ typedef struct register_file
 				  assert_exists(__is_vmh, "END_VMH used without VMH!"); \
 				}
 #define NEXT_INSTRUCTION	do { VMI_EXIT; _NEXT_INSTRUCTION; } while(0)
-#define VMI_GOTO(n)		do { VMI_EXIT; _VMI_GOTO(n); } while(0)
+#define VMI_GOTO(...)		do { VMI_EXIT; _VMI_GOTO(__VA_ARGS__); } while(0)
 #define VMH_GOTO(...)		do { _VMH_GOTO(__VA_ARGS__); } while(0)
 #define SOLUTION_RETURN(val)	do { VMI_EXIT; _SOLUTION_RETURN(val); } while(0)
 #define VMI_GOTO_CODE(c)	do { VMI_EXIT; _VMI_GOTO_CODE(c); } while(0)
 #define SEPARATE_VMI		(void)0 /* only needed for !O_VMI_FUNCTIONS && VMCODE_IS_ADDRESS */
 
 /* By default, instruction and helper prologue/epilogue are empty */
-#define _VMI_PROLOGUE(Name,f,na,a)	;
+#define _VMI_PROLOGUE(Name,f,na,a,an)	;
 #define _VMI_EPILOGUE			;
 #define _VMH_PROLOGUE(Name,na,at,an)	;
 #define _VMH_EPILOGUE			;
@@ -2979,17 +2980,66 @@ typedef struct register_file
 				      } while(0)
 
 
-/* Helper macros for rendering VMH arguments */
+/* Helper macros for rendering VMI/VMH arguments */
 #define HEAD(h, ...) h
 #define TAIL(_, t...) (t)
-#define VMH_ARGS0(n,at,an,f,asep...)
-#define VMH_ARGS1(n,at,an,f,asep...) f(n, HEAD at, HEAD an)
-#define VMH_ARGS2(n,at,an,f,asep...) f(n, HEAD at, HEAD an) asep VMH_ARGS1(n, TAIL at, TAIL an, f, asep)
-#define VMH_ARGS3(n,at,an,f,asep...) f(n, HEAD at, HEAD an) asep VMH_ARGS2(n, TAIL at, TAIL an, f, asep)
-#define VMH_ARGS4(n,at,an,f,asep...) f(n, HEAD at, HEAD an) asep VMH_ARGS3(n, TAIL at, TAIL an, f, asep)
+#define VM_ARGS0(n,at,an,f,asep...)
+#define VM_ARGS1(n,at,an,f,asep...) f(n, HEAD at, HEAD an)
+#define VM_ARGS2(n,at,an,f,asep...) f(n, HEAD at, HEAD an) asep VM_ARGS1(n, TAIL at, TAIL an, f, asep)
+#define VM_ARGS3(n,at,an,f,asep...) f(n, HEAD at, HEAD an) asep VM_ARGS2(n, TAIL at, TAIL an, f, asep)
+#define VM_ARGS4(n,at,an,f,asep...) f(n, HEAD at, HEAD an) asep VM_ARGS3(n, TAIL at, TAIL an, f, asep)
 #define COMMA_TYPE_ARG(n,at,an) , at an
 #define TYPE_ARG_SEMI(n,at,an)	at an ;
-#define VMH_ARGS(n) A_PASTE(VMH_ARGS, VMH_ARGCOUNT(n))(n, (VMH_ARGTYPES(n)), (VMH_ARGNAMES(n)), TYPE_ARG_SEMI)
+#define VMH_ARGS(n) A_PASTE(VM_ARGS, VMH_ARGCOUNT(n))(n, (VMH_ARGTYPES(n)), (VMH_ARGNAMES(n)), TYPE_ARG_SEMI)
+
+#define MARK_VAR_USED(n,at,an)		(void)(an)
+#define MARK_USED(...)			A_PASTE(VM_ARGS,A_COUNT(__VA_ARGS__))(~, (__VA_ARGS__), (__VA_ARGS__), MARK_VAR_USED, ,)
+
+/* Default VMI arg handling: assign variables sequentially from PC */
+#define ARG_WSIZE(an)			an ## __wsize
+#define ARG_COPYBUF(an)			an ## __buf
+#define _ARG_VARNUM(an)			an ## __varnum
+#define ARG_VARNUM(an)			(MARK_USED(an), _ARG_VARNUM(an))
+#define ARG_VARFRAMEP(an)		varFrameP(FR, _ARG_VARNUM(an))
+#define SET_CHOICEPOINT(an, chp)	do{if(0)(void)an;*ARG_VARFRAMEP(an) = consTermRef(chp);} while (0)
+#define RESTORE_VAR(an)			an = ARG_VARFRAMEP(an)
+#define SET_PCARG_SIZE(an,sz)		size_t ARG_WSIZE(an) = (sz)
+#define VARNUM_PCARG(an)		SET_PCARG_SIZE(an, 1); int _ARG_VARNUM(an) = (int)*PC; PC += ARG_WSIZE(an)
+#define SIZED_COPY_PCARG(an,sz)		SET_PCARG_SIZE(an, sz); struct {word buf[sz];} ARG_COPYBUF(an) = *(typeof(ARG_COPYBUF(an))*)PC; PC += ARG_WSIZE(an); Word an = ARG_COPYBUF(an).buf
+#define SIZED_REF_PCARG(an,typ,ref,sz)	SET_PCARG_SIZE(an, sz); typ an = (typ)(ref); PC += ARG_WSIZE(an)
+#define SIZED_PCARG(an,typ,sz)		SIZED_REF_PCARG(an, typ, *PC, sz)
+#define STANDARD_PCARG(an,typ)		SIZED_PCARG(an, typ, 1)
+#define ASSIGN_PCARG__CA1_PROC(an)	STANDARD_PCARG(an, Procedure)
+#define ASSIGN_PCARG__CA1_FUNC(an)	STANDARD_PCARG(an, functor_t)
+#define ASSIGN_PCARG__CA1_DATA(an)	STANDARD_PCARG(an, word)
+#define ASSIGN_PCARG__CA1_INTEGER(an)	STANDARD_PCARG(an, intptr_t)
+#define ASSIGN_PCARG__CA1_INT64(an)	SIZED_COPY_PCARG(an, WORDS_PER_INT64)
+#define ASSIGN_PCARG__CA1_FLOAT(an)	SIZED_COPY_PCARG(an, WORDS_PER_DOUBLE)
+#define ASSIGN_PCARG__CA1_STRING(an)	SIZED_REF_PCARG(an, Code, PC, wsizeofInd(*PC)+1)
+#define ASSIGN_PCARG__CA1_MPZ(an)	SIZED_REF_PCARG(an, Code, PC, wsizeofInd(*PC)+1)
+#define ASSIGN_PCARG__CA1_MPQ(an)	SIZED_REF_PCARG(an, Code, PC, wsizeofInd(*PC)+1)
+#define ASSIGN_PCARG__CA1_MODULE(an)	STANDARD_PCARG(an, Module)
+#define ASSIGN_PCARG__CA1_VAR(an)	VARNUM_PCARG(an); Word an = ARG_VARFRAMEP(an)
+#define ASSIGN_PCARG__CA1_FVAR(an)	VARNUM_PCARG(an); Word an = ARG_VARFRAMEP(an)
+#define ASSIGN_PCARG__CA1_CHP(an)	VARNUM_PCARG(an); Choice an = (Choice) valTermRef(*ARG_VARFRAMEP(an))
+#define ASSIGN_PCARG__CA1_FOREIGN(an)	STANDARD_PCARG(an, Func)
+#define ASSIGN_PCARG__CA1_CLAUSEREF(an)	STANDARD_PCARG(an, ClauseRef)
+#define ASSIGN_PCARG__CA1_JUMP(an)	STANDARD_PCARG(an, size_t)
+#define ASSIGN_PCARG__CA1_AFUNC(an)	STANDARD_PCARG(an, code)
+#define ASSIGN_PCARG__CA1_TRIE_NODE(an)	STANDARD_PCARG(an, trie_node *)
+
+/* RESTORE_VARS(...): recalculate the ARG_VARFRAMEP after a potential stack shift */
+#define RESTORE_VARS(...)		A_PASTE(RESTORE_VARS__, A_COUNT(__VA_ARGS__))(__VA_ARGS__)
+#define RESTORE_VARS__0(...)		/* empty */
+#define RESTORE_VARS__1(an,...)		RESTORE_VAR(an)
+#define RESTORE_VARS__2(an,...)		RESTORE_VAR(an) ; RESTORE_VARS__1(__VA_ARGS__)
+#define RESTORE_VARS__3(an,...)		RESTORE_VAR(an) ; RESTORE_VARS__2(__VA_ARGS__)
+
+#define ASSIGN_PCARG(n,at,an)		A_PASTE(ASSIGN_PCARG__, at)(an);
+#define _VMI_PROCESS_ARGS(n,f,na,a,an)	A_PASTE(VM_ARGS,A_COUNT(A_UNWRAP(an)))(n, a, an, ASSIGN_PCARG)
+
+#define GET_ARGSIZE(n,at,an)		ARG_WSIZE(an)
+#define TOTAL_ARGSIZE(...)		M_IFEMPTY(__VA_ARGS__)(0)((A_PASTE(VM_ARGS,A_COUNT(__VA_ARGS__))(~, (__VA_ARGS__), (__VA_ARGS__), GET_ARGSIZE, +)))
 
 /* Define struct types for all the helper argument lists */
 #define VMH_ARGSTRUCT(Name)		struct helper_args_ ## Name
@@ -3000,19 +3050,19 @@ FOREACH_VMH(T_EMPTY,
 
 #define ASSIGN_ARG(n,at,an)		at an = HELPER_ARGS(n).an;
 #undef _VMH_PROLOGUE
-#define _VMH_PROLOGUE(Name,na,at,an)	VMH_ARGS ## na(Name, at, an, ASSIGN_ARG)
+#define _VMH_PROLOGUE(Name,na,at,an)	VM_ARGS ## na(Name, at, an, ASSIGN_ARG)
 #if O_VMI_FUNCTIONS
 
 #define HELPER_ARGS(n)			__args
-#define _VMI_DECLARATION(Name,na,at,an)	static VMI_RETTYPE instr_ ## Name(VMI_ARG_DECL)
-#define _VMH_DECLARATION(Name,na,at,an)	static VMI_RETTYPE helper_ ## Name(VMI_ARG_DECL, VMH_ARGSTRUCT(Name) __args)
+#define _VMI_DECLARATION(Name,...)	static VMI_RETTYPE instr_ ## Name(VMI_ARG_DECL)
+#define _VMH_DECLARATION(Name,...)	static VMI_RETTYPE helper_ ## Name(VMI_ARG_DECL, VMH_ARGSTRUCT(Name) __args)
 #define _NEXT_INSTRUCTION		return PC
 #define _SOLUTION_RETURN(val)		SOLUTION_RET = (val); longjmp(EXIT_VM_BUF, 1)
-#define _VMI_GOTO(n)			PC--; return instr_ ## n(VMI_ARG_PASS)
+#define _VMI_GOTO(n,...)		PC--; MARK_USED(__VA_ARGS__); return instr_ ## n(VMI_ARG_PASS)
 #define _VMH_GOTO(n,...)		VMH_ARGSTRUCT(n) __args = {__VA_ARGS__}; (void)__args; \
 					return helper_ ## n(VMI_ARG_PASS, __args)
 #undef _VMI_PROLOGUE
-#define _VMI_PROLOGUE(Ident,f,na,a)	PC++;
+#define _VMI_PROLOGUE(Ident,f,na,a,an)	PC++;
 #if VMCODE_IS_ADDRESS
 #define VMI_ADDR(c)		((vmi_instr)(c))
 #else
@@ -3058,7 +3108,7 @@ static vmi_instr jmp_table[] =
 #else /* O_VMI_FUNCTIONS */
 
 #define HELPER_ARGS(n)			helper_args.n
-#define _VMH_DECLARATION(Name,na,at,an)	helper_ ## Name:
+#define _VMH_DECLARATION(Name,...)	helper_ ## Name:
 #define _VMH_GOTO(n,args...)		VMH_ARGSTRUCT(n) __args = {args}; \
 					HELPER_ARGS(n) = __args; \
 					goto helper_ ## n;
@@ -3066,9 +3116,9 @@ static vmi_instr jmp_table[] =
 
 #if VMCODE_IS_ADDRESS
 
-#define _VMI_DECLARATION(Name,f,na,a)	Name ## _LBL:
+#define _VMI_DECLARATION(Name,...)	Name ## _LBL:
 #define _NEXT_INSTRUCTION		DbgPrintInstruction(FR, PC); _VMI_GOTO_CODE(*PC++)
-#define _VMI_GOTO(n)			goto n ## _LBL
+#define _VMI_GOTO(n,...)		MARK_USED(__VA_ARGS__); PC -= TOTAL_ARGSIZE(__VA_ARGS__); goto n ## _LBL
 #define _VMI_GOTO_CODE(c)		goto *(void *)(c)
 #undef SEPARATE_VMI
 /* This macro must ensure that two identical VMI instructions do not get
@@ -3086,9 +3136,9 @@ static vmi_instr jmp_table[] =
 #define UNUSED_LABEL
 #endif
 
-#define _VMI_DECLARATION(Name,f,na,a)	case Name: case_ ## Name: UNUSED_LABEL
+#define _VMI_DECLARATION(Name,...)	case Name: case_ ## Name: UNUSED_LABEL
 #define _NEXT_INSTRUCTION		goto next_instruction
-#define _VMI_GOTO(n)			goto case_ ## n
+#define _VMI_GOTO(n,...)		MARK_USED(__VA_ARGS__); goto case_ ## n
 #define _VMI_GOTO_CODE(c)		thiscode = (c); goto resumebreak;
 
 #endif /* VMCODE_IS_ADDRESS */
