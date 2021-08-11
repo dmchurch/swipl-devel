@@ -1203,24 +1203,14 @@ attribute list for terms that are newer than the choicepoint or having a
 value that is changed due to a trailed assignment.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-static inline word
-get_value(Word p)
-{ return (*p) & ~MARK_MASK;
-}
-
 #define deRefM(p, pv) LDFUNC(deRefM, p, pv)
 static Word
 deRefM(DECL_LD Word p, Word pv)
-{ for(;;)
-  { word w = get_value(p);
-
-    if ( isRef(w) )
-    { p = unRef(w);
-    } else
-    { *pv = w;
-      return p;
-    }
+{ FOR_EACH_UNREF(p)
+  { UNREF_VALUE &= ~MARK_MASK;
   }
+  *pv = *p & ~MARK_MASK;
+  return p;
 }
 
 

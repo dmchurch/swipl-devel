@@ -1056,6 +1056,13 @@ PL_initialise(int argc, char **argv)
     /* One's complement tells p_d_f_s not to bail on error, just return */
     prolog_debug_from_string(argv[2], ~TRUE);
 
+#ifdef COUNT_DEREFS
+  if (clock_getcpuclockid(0, &deref_clockid))
+  { perror("clock_getcpuclockid");
+    return 0;
+  }
+#endif
+
   initAlloc();
   initPrologThreads();			/* initialise thread system */
   SinitStreams();
@@ -1470,6 +1477,29 @@ cleanupProlog(int rval, int reclaim_memory)
 #else
   GET_LD
 #endif
+
+#ifdef COUNT_DEREFS
+  int lastvalid = -1;
+  int total = 0;
+  int64_t total_nsecs = 0;
+  for (int i = 0; i < (sizeof(deref_counts)/sizeof(deref_counts[0])); i++)
+  { if (deref_counts[i] > 0)
+    { lastvalid = i;
+      total += deref_counts[i];
+      total_nsecs += deref_secs[i] * 1000000000 + deref_nsecs[i];
+    }
+  }
+#ifdef TIME_DEREFS
+#define IF_TIMING(...) __VA_ARGS__
+#else
+#define IF_TIMING(...)
+#endif
+  Sdprintf("deRef() calls: %d " IF_TIMING("avg time: %.3f ns ") "chain lengths:\n", total IF_TIMING(, (double)total_nsecs / total));
+  for (int i = 0; i <= lastvalid; i++)
+  { Sdprintf("%d: %d" IF_TIMING(", avg %.3f ns") "\n", i, deref_counts[i] IF_TIMING(, (double)(deref_secs[i] * 1000000000 + deref_nsecs[i]) / deref_counts[i]));
+  }
+#undef IF_TIMING
+#endif /*COUNT_DEREFS*/
 
   GD->cleaning = CLN_PROLOG;
   debugmode(FALSE, NULL);		/* avoid recursive tracing */

@@ -174,9 +174,9 @@ reference pointers to the local stack as it used to be.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
 #undef makeRef
-#undef unRef
+// #undef unRef
 #define makeRef(p)	((void*)p >= (void*)lBase ? makeRefLok(p) : makeRefG(p))
-#define unRef(w)	((Word)valPtr(w))
+// #define unRef(w)	((Word)valPtr(w))
 
 #define ldomark(p)	{ *(p) |= MARK_MASK; }
 #define domark(p)	{ if ( is_marked(p) ) \
@@ -899,7 +899,7 @@ forward:				/* Go into the tree */
 
   switch(tag(val))
   { case TAG_REFERENCE:
-    { next = unRef(val);		/* address pointing to */
+    { next = unRefFrom(val, current);		/* address pointing to */
       DEBUG(CHK_SECURE, assert(onStack(global, next)));
       needsRelocation(current);
       if ( is_first(next) )		/* ref to choice point. we will */

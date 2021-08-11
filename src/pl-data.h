@@ -225,10 +225,15 @@ and while loading .wic files.  It comes at no price.
 		 *	    REFERENCES		*
 		 *******************************/
 
+/* #define COUNT_DEREFS /* Profiling: count the length of ref-chains during deRef, print at end of execution, miniscule performance impact */
+/* #define TIME_DEREFS /* Profiling: also time each deRef(), print with count at end. EXPENSIVE. */
+
 #define isRef(w)	(tag(w) == TAG_REFERENCE)
-#define unRef(w)	((Word)valPtr2(w, STG_GLOBAL))
-#define deRef(p)	{ while(isRef(*(p))) (p) = unRef(*(p)); }
-#define deRef2(p, d)	{ (d) = (p); deRef(d); }
+#define unRef(w)	f_unRefFrom(w, &(w))
+#define unRefFrom(w, p)	f_unRefFrom(w, p)
+#define deRef(p)	{ (p) = f_deRef(p, NULL); }
+#define deRef2(p, d)	{ (d) = f_deRef(p, NULL); }
+#define deRefLast(p, l)	{ (p) = f_deRef(p, &(l)); }
 #define makeRefG(p)	consPtr(p, TAG_REFERENCE|STG_GLOBAL)
 #ifdef O_ATTVAR
 #define needsRef(w)	(tag(w) <= TAG_ATTVAR)
@@ -241,6 +246,9 @@ and while loading .wic files.  It comes at no price.
 #define makeRefLG(p)	((void*)(p) >= (void*)lBase ? makeRefLok(p) : makeRefG(p))
 #define unRefLG(w)	((Word)valPtr(w))
 
+#define FOR_EACH_UNREF_VALUE(p, v, ...) for(__VA_ARGS__ (v) = *(p); isRef(v); p = unRefFrom(v, p), (v) = *(p))
+#define FOR_EACH_UNREF(p) FOR_EACH_UNREF_VALUE((p), __unref_value, word)
+#define UNREF_VALUE __unref_value /* can be used in a FOR_EACH_UNREF loop to test/alter value
 
 		 /*******************************
 		 *	COMPOUNDS AND LISTS	*
@@ -346,7 +354,9 @@ static inline Atom	fetchAtomArray(size_t index);
 
 #define MAXTAGGEDPTR	(((word)1<<((8*sizeof(word))-5)) - 1)
 
-#define consInt(n)	(((word)(n)<<LMASK_BITS) | TAG_INTEGER)
-#define consUInt(n)	(((word)(n)<<LMASK_BITS) | TAG_INTEGER)
+#define consWord(val, tag)	(((word)(val)<<LMASK_BITS) | tag)
+
+#define consInt(n)	consWord(n, TAG_INTEGER)
+#define consUInt(n)	consWord(n, TAG_INTEGER)
 
 

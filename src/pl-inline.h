@@ -383,6 +383,13 @@ same_type_numbers(Number n1, Number n2)
   return make_same_type_numbers(n1, n2);
 }
 
+#if USE_LD_MACROS
+#define Trail(p, v) LDFUNC(Trail, p, v)
+#define f_unRefFrom(w, p) LDFUNC(f_unRefFrom, w, p)
+#define f_deRef(p, lastRef) LDFUNC(f_deRef, p, lastRef)
+#define f_consPtr(p, base, ts) LDFUNC(f_consPtr, p, base, ts)
+#endif
+
 /* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 Mark() sets LD->mark_bar, indicating  that   any  assignment  above this
 value need not be trailed.
@@ -390,7 +397,6 @@ value need not be trailed.
 Note that the local stack is always _above_ the global stack.
 - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - */
 
-#define Trail(p, v) LDFUNC(Trail, p, v)
 static inline void
 Trail(DECL_LD Word p, word v)
 { DEBUG(CHK_SECURE, assert(tTop+1 <= tMax));
@@ -400,14 +406,71 @@ Trail(DECL_LD Word p, word v)
   *p = v;
 }
 
+static inline Word
+f_unRefFrom(DECL_LD word w, Word p)
+{ switch(storage(w))
+  { case STG_GLOBAL:
+      /* standard ref */
+      return valPtr2(w, STG_GLOBAL);
+    case STG_LOCAL:
+      /* local ref, used only by GC */
+      return valPtr2(w, STG_LOCAL);
+    case STG_INLINE:
+#ifdef O_TERM_PAINT
+      /* paint ref; value referent is next cell */
+      assert(p);
+      return p + 1;
+#endif
+    case STG_RESERVED:
+    default:
+      assert(0);
+  }
+}
+
+#define IF_COUNTING(...)
+#define IF_TIMING(...)
+#ifdef COUNT_DEREFS
+# undef IF_COUNTING
+# define IF_COUNTING(...) __VA_ARGS__
+# ifdef TIME_DEREFS
+#  undef IF_TIMING
+#  define IF_TIMING(...) __VA_ARGS__
+# endif
+#endif
+
+IF_COUNTING(GLOBAL int64_t deref_counts[256];)
+IF_TIMING(GLOBAL int64_t deref_secs[256];)
+IF_TIMING(GLOBAL int64_t deref_nsecs[256];)
+IF_TIMING(GLOBAL clockid_t deref_clockid;)
+
+static inline Word
+f_deRef(DECL_LD Word p, Word *lastRef)
+{ Word ref = NULL;
+  IF_COUNTING(uint8_t count = 0;)
+  IF_TIMING(struct timespec tv_start, tv_end;)
+  IF_TIMING(clock_gettime(deref_clockid, &tv_start);)
+  FOR_EACH_UNREF(p)
+  { ref = p;
+    IF_COUNTING(count++;)
+  }
+  IF_TIMING(clock_gettime(deref_clockid, &tv_end);)
+  IF_TIMING(deref_secs[count] += tv_end.tv_sec - tv_start.tv_sec;)
+  IF_TIMING(deref_nsecs[count] += tv_end.tv_nsec - tv_start.tv_nsec;)
+  IF_COUNTING(deref_counts[count]++;)
+  if ( lastRef )
+  { *lastRef = ref;
+  }
+  return p;
+}
+
+#undef IF_COUNTING
+#undef IF_TIMING
 
 #define consPtrB(p, base, ts)	f_consPtr(p, (uintptr_t)(base), ts)
 #define consPtr(p, ts)		consPtrB(p, LD->bases[(ts)&STG_MASK], (ts))
-#define f_consPtr(p, base, ts) LDFUNC(f_consPtr, p, base, ts)
 static inline word
 f_consPtr(DECL_LD void *p, uintptr_t base, word ts)
 { uintptr_t v = (uintptr_t) p;
-
   v -= base;
   DEBUG(CHK_SECURE, assert(v < MAXTAGGEDPTR && !(v&0x3)));
   return (v<<5)|ts;

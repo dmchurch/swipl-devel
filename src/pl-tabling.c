@@ -2575,7 +2575,8 @@ clearThreadTablingData(PL_local_data_t *ld)
 #define indexOfWord(w) LDFUNC(indexOfWord, w)
 static word
 indexOfWord(DECL_LD word w)
-{ for(;;)
+{ Word wp = NULL;
+  for(;;)
   { switch(tag(w))
     { case TAG_VAR:
       case TAG_ATTVAR:
@@ -2601,7 +2602,8 @@ indexOfWord(DECL_LD word w)
 	w = *valPtr(w);			/* functor_t */
 	break;
       case TAG_REFERENCE:
-	w = *unRef(w);
+	wp = unRefFrom(w, wp);
+	w = *wp;
 	continue;
     }
 

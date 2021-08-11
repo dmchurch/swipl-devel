@@ -185,6 +185,8 @@ handy for it someone wants to add a data type to the system.
   O_GVAR
       Include support for backtrackable global variables.  This option
       requires O_DESTRUCTIVE_ASSIGNMENT.
+  O_TERM_PAINT
+      Include support for painted terms.
   O_CYCLIC
       Provide support for cyclic terms.
   O_LOCALE
@@ -222,6 +224,7 @@ handy for it someone wants to add a data type to the system.
 #define O_ATTVAR		1
 #define O_CALL_RESIDUE		1
 #define O_GVAR			1
+#define O_TERM_PAINT		1
 #define O_CYCLIC		1
 #define O_MITIGATE_SPECTRE	1
 #ifndef O_PREFER_RATIONALS
@@ -2600,7 +2603,7 @@ decrease).
 #endif
 
 #define NULL_ATOM ((atom_t)0)
-#define MK_ATOM(n)		((atom_t)((n)<<7|TAG_ATOM|STG_STATIC))
+#define MK_ATOM(n)		((atom_t)((n)<<LMASK_BITS|TAG_ATOM|STG_STATIC))
 #include "pl-atom.ih"
 #include "pl-funct.ih"
 

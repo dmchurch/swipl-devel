@@ -2513,7 +2513,7 @@ VMI(L_VAR, 0, 2, (CA1_FVAR,CA1_VAR))
   word w = *v2;
 
   while(isRef(w))
-  { v2 = unRef(w);
+  { v2 = unRefFrom(w, v2);
     if ( needsRef(*v2) )
       break;
     w = *v2;

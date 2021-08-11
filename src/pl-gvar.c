@@ -176,7 +176,7 @@ setval(DECL_LD term_t var, term_t value, int backtrackable)
   { Word p;
 
     if ( isRef(old) )
-    { p = unRef(old);
+    { p = unRefFrom(old, NULL);
     } else
     { p = allocGlobal(1);
       *p = old;
@@ -274,7 +274,7 @@ gvar_value(DECL_LD atom_t name, Word p)
 static int
 is_gval(DECL_LD word w)
 { if ( isRef(w) )
-    w = *unRef(w);
+    w = *unRefFrom(w, NULL);
 
   return w != ATOM_no_value;
 }

@@ -1441,7 +1441,7 @@ reclaim_attvars(DECL_LD Word after)
     if ( isVar(w) )
       LD->attvar.attvars = NULL;
     else
-      LD->attvar.attvars = unRef(w);
+      LD->attvar.attvars = unRefFrom(w, LD->attvar.attvars);
   }
 }
 #endif

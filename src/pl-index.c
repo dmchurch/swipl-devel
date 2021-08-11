@@ -146,13 +146,15 @@ hashIndex(word key, int buckets)
 #define canIndex(w) LDFUNC(canIndex, w)
 static inline int
 canIndex(DECL_LD word w)
-{ for(;;)
+{ Word p = NULL;
+  for(;;)
   { switch(tag(w))
     { case TAG_VAR:
       case TAG_ATTVAR:
 	return FALSE;
       case TAG_REFERENCE:
-	w = *unRef(w);
+	p = unRefFrom(w, p);
+	w = *p;
 	continue;
       default:
 	return TRUE;
@@ -164,7 +166,8 @@ canIndex(DECL_LD word w)
 #define indexOfWord(w) LDFUNC(indexOfWord, w)
 static inline word
 indexOfWord(DECL_LD word w)
-{ for(;;)
+{ Word wp = NULL;
+  for(;;)
   { switch(tag(w))
     { case TAG_VAR:
       case TAG_ATTVAR:
@@ -190,7 +193,8 @@ indexOfWord(DECL_LD word w)
 	w = *valPtr(w);			/* functor_t */
 	break;
       case TAG_REFERENCE:
-	w = *unRef(w);
+	wp = unRefFrom(w, wp);
+	w = *wp;
 	continue;
     }
 

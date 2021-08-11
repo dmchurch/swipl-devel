@@ -164,7 +164,7 @@ linkVal(DECL_LD Word p)
 { word w = *p;
 
   while( isRef(w) )
-  { p = unRef(w);
+  { p = unRefFrom(w, p);
     if ( needsRef(*p) )
       return w;
     w = *p;
@@ -206,9 +206,10 @@ linkValG(DECL_LD Word p)
 { word w;
 
 retry:
+  // FIXME!!! FOR_EACH_UNREF_VALUE(p, w)
   w = *p;
   while( isRef(w) )
-  { p = unRef(w);
+  { p = unRefFrom(w, p);
     if ( needsRef(*p) )
       return w;
     w = *p;
@@ -253,7 +254,7 @@ linkValNoG(DECL_LD Word p)
 { word w = *p;
 
   while(isRef(w))
-  { p = unRef(w);
+  { p = unRefFrom(w, p);
     w = *p;
   }
 

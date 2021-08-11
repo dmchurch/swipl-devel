@@ -1385,7 +1385,7 @@ link_shared(DECL_LD Word t)
       if ( isRef(*d) )			/* shared term */
       { Word v;
 
-	v = unRef(*d & ~(FIRST_MASK|MARK_MASK));
+	v = unRefFrom(*d & ~(FIRST_MASK|MARK_MASK), d);
 	deRef(v);
 
 	if ( is_marked(d) )

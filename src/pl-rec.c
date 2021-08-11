@@ -485,7 +485,7 @@ compile_term_to_heap(DECL_LD term_agenda *agenda, CompileInfo info)
     { case TAG_VAR:
       { intptr_t n = info->nvars++;
 
-	*p = (n<<7)|TAG_ATOM|STG_GLOBAL;
+	*p = consWord(n, TAG_ATOM|STG_GLOBAL);
 	addBuffer(&info->vars, p, Word);
 	addOpCode(info, PL_TYPE_VARIABLE);
 	addSizeInt(info, n);
@@ -503,7 +503,7 @@ compile_term_to_heap(DECL_LD term_agenda *agenda, CompileInfo info)
 	}
 
 	addBuffer(&info->vars, *p, word);		/* save value */
-	*p = (n<<7)|TAG_ATOM|STG_GLOBAL;
+	*p = consWord(n, TAG_ATOM|STG_GLOBAL);
 	addBuffer(&info->vars, mkAttVarP(p), Word);
 	addOpCode(info, PL_TYPE_ATTVAR);
 	addSizeInt(info, n);
@@ -517,7 +517,7 @@ compile_term_to_heap(DECL_LD term_agenda *agenda, CompileInfo info)
 #endif
       case TAG_ATOM:
       { if ( storage(w) == STG_GLOBAL )	/* this is a variable */
-	{ intptr_t n = ((intptr_t)(w) >> 7);
+	{ intptr_t n = valInt(w);
 
 	  addOpCode(info, PL_TYPE_VARIABLE);
 	  addSizeInt(info, n);
