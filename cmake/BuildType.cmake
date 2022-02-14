@@ -50,10 +50,22 @@ elseif(CMAKE_C_COMPILER_ID STREQUAL AppleClang)
   set(CMAKE_C_FLAGS_DEBUG "-DO_DEBUG -gdwarf-2 -g3"
       CACHE STRING "CFLAGS for a Debug build" FORCE)
 elseif(EMSCRIPTEN)
-  set(CMAKE_C_FLAGS_DEBUG "-DO_DEBUG -O0 -g3 -sASSERTIONS=1 -sSAFE_HEAP=1 -sDEFAULT_TO_CXX=0"
+  set(CMAKE_C_FLAGS_DEBUG "-DO_DEBUG -O0 -g3 -sDEFAULT_TO_CXX=0"
       CACHE STRING "CFLAGS for a Debug build" FORCE)
   set(CMAKE_C_FLAGS_RELEASE "-O3 -sDEFAULT_TO_CXX=0"
       CACHE STRING "CFLAGS for a Release build" FORCE)
+  set(CMAKE_C_FLAGS_PGO "-O3 -sDEFAULT_TO_CXX=0"
+      CACHE STRING "CFLAGS for a PGO build" FORCE)
+
+  # CMake doesn't have a single per-config variable for LDFLAGS, so...
+  set(CMAKE_EXE_LINKER_FLAGS_DEBUG "-sASSERTIONS=1 -sSAFE_HEAP=1"
+      CACHE STRING "LDFLAGS for a Debug build" FORCE)
+  set(CMAKE_MODULE_LINKER_FLAGS_DEBUG "-sASSERTIONS=1 -sSAFE_HEAP=1"
+      CACHE STRING "LDFLAGS for a Debug build" FORCE)
+  set(CMAKE_SHARED_LINKER_FLAGS_DEBUG "-sASSERTIONS=1 -sSAFE_HEAP=1"
+      CACHE STRING "LDFLAGS for a Debug build" FORCE)
+  # set(CMAKE_STATIC_LINKER_FLAGS_DEBUG "-sASSERTIONS=1 -sSAFE_HEAP=1"
+  #     CACHE STRING "LDFLAGS for a Debug build" FORCE)
 else()
   message("Unknown C compiler.  ${CMAKE_C_COMPILER_ID}")
 endif()

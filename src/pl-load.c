@@ -35,6 +35,7 @@
 
 #include "pl-load.h"
 #include "pl-fli.h"
+#include "pl-util.h"
 #ifndef MAXPATHLEN
 #define MAXPATHLEN 1024
 #endif

@@ -14,6 +14,7 @@ set(USE_SIGNALS OFF)
 set(BUILD_SWIPL_LD OFF)
 set(INSTALL_DOCUMENTATION OFF)
 # set(MULTI_THREADED OFF)
+set(VMI_FUNCTIONS ON) # The WebAssembly VM needs to use the functions implementation, at least with the current codebase
 
 if(MULTI_THREADED)
 # If multithreading is requested, make sure -pthread is passed for EVERY command line, since
@@ -68,12 +69,15 @@ function(check_node_feature js_expression var)
     set(node_script "process.exit((${js_expression})?0:1)")
     message(STATUS "Checking for flags required ${description}")
     set(success 0)
+    set(output)
     foreach(node_opt "" "--wasm-staging" "--wasm-staging --experimental-wasm-threads" "--experimental-wasm-threads")
+        message(STATUS "Checking flag ${node_opt}...")
         execute_process(COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} ${node_opt} -e "${node_script}"
                         TIMEOUT 10
                         RESULT_VARIABLE retval
-                        OUTPUT_VARIABLE output
-                        ERROR_VARIABLE output)
+                        OUTPUT_VARIABLE out
+                        ERROR_VARIABLE out)
+        set(output "${output}> ${CMAKE_CROSSCOMPILING_EMULATOR} ${node_opt} -e \"${node_script}\"\nRetval ${retval}, output:\n${out}\n")
         if(retval EQUAL 0)
             set(success 1)
             set(feature_opt "${node_opt}")
