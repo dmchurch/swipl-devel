@@ -24,10 +24,6 @@ add_link_options(-pthread)
 set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} -pthread")
 endif()
 
-# fsr this doesn't get included by emscripten
-list(APPEND CMAKE_FIND_ROOT_PATH "${EMSCRIPTEN_ROOT_PATH}/cache/sysroot")
-list(APPEND CMAKE_SYSTEM_INCLUDE_PATH "${EMSCRIPTEN_ROOT_PATH}/cache/sysroot/include")
-
 function(get_emscripten_cflags var)
     execute_process(COMMAND ${CMAKE_C_COMPILER} --cflags
                     OUTPUT_VARIABLE orig_cflags)

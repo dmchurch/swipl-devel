@@ -45,7 +45,7 @@ set(WASM_WEB_LINK_FLAGS
     -s NO_EXIT_RUNTIME=0
     -s EXPORTED_FUNCTIONS=@${CMAKE_SOURCE_DIR}/src/wasm/exports.json
     -s EXPORTED_RUNTIME_METHODS=@${CMAKE_SOURCE_DIR}/src/wasm/runtime_exports.json
-    --preload-file ${CMAKE_CURRENT_BINARY_DIR}/${WASM_PRELOAD_DIR}
+    --preload-file ${CMAKE_CURRENT_BINARY_DIR}/${WASM_PRELOAD_DIR}@${WASM_PRELOAD_DIR}
     --post-js ${CMAKE_SOURCE_DIR}/src/wasm/prolog.js)
 join_list(WASM_WEB_LINK_FLAGS_STRING " " ${WASM_WEB_LINK_FLAGS})
 
@@ -54,6 +54,3 @@ set_target_properties(swipl-web PROPERTIES
 		      LINK_FLAGS "${WASM_WEB_LINK_FLAGS_STRING}")
 target_link_libraries(swipl-web libswipl)
 add_dependencies(swipl-web wasm_preload)
-
-# PL_next_solution() fails in wasm when compiled at -O0
-set_source_files_properties(pl-wam.c PROPERTIES COMPILE_FLAGS "$<$<CONFIG:Debug>:-O1>")
