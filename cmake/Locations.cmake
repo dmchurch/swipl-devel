@@ -5,6 +5,9 @@
 
 function(set_install_prefix)
   set(prefix "$ENV{SWIPL_INSTALL_PREFIX}")
+  if(EMSCRIPTEN AND NOT prefix)
+    set(prefix "/home/web_user")
+  endif()
 
   if(prefix)
     if(prefix MATCHES "@builddir@")

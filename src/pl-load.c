@@ -358,6 +358,8 @@ void
 cleanupForeign(void)
 {}
 
+#include "pl-util.h" /* declares notImplemented */
+
 static
 PRED_IMPL("$open_shared_object", 3, open_shared_object, 0)
 { return notImplemented("open_shared_object", 3);

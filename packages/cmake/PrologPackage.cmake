@@ -164,6 +164,9 @@ function(swipl_plugin name)
 
   if(v_c_sources)
     set(foreign_target "plugin_${v_module}")
+    if(EMSCRIPTEN)
+      set(type STATIC)
+    endif()
     add_library(${foreign_target} ${type} ${v_c_sources})
     set_target_properties(${foreign_target} PROPERTIES
 			  OUTPUT_NAME ${v_module} PREFIX "")

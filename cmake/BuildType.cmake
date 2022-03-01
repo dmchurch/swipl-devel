@@ -35,20 +35,44 @@ endif()
 # Using gdwarf-2 -g3 allows using macros in gdb, which helps a lot
 # when debugging the Prolog internals.
 if(CMAKE_COMPILER_IS_GNUCC)
-  set(CMAKE_C_FLAGS_DEBUG "-DO_DEBUG -DO_DEBUG_ATOMGC -O0 -gdwarf-2 -g3"
+  set(DEBUG_SYMBOL_FLAGS "-gdwarf-2 -g3")
+  set(SANITIZE_FLAGS "-fsanitize=address -fno-omit-frame-pointer")
+  set(COMPILER_IS_GNULIKE 1)
+elseif(EMSCRIPTEN)
+  set(DEBUG_SYMBOL_FLAGS "-g3 -gsource-map -fdebug-macro")
+  set(COMPILER_NEEDS_FLAGS "-sDEFAULT_TO_CXX=0")
+  set(LINKER_NEEDS_FLAGS "-sALLOW_MEMORY_GROWTH=1")
+
+  # CMake doesn't have a single per-config variable for LDFLAGS, so...
+  set(CMAKE_SHARED_LINKER_FLAGS_DEBUG "-sASSERTIONS=1 -sSAFE_HEAP=1"
+      CACHE STRING "LDFLAGS for a Debug build, library linking" FORCE)
+  set(CMAKE_EXE_LINKER_FLAGS_DEBUG "-sASSERTIONS=1 -sSAFE_HEAP=1"
+      CACHE STRING "LDFLAGS for a Debug build, final linking" FORCE)
+  set(CMAKE_SHARED_LINKER_FLAGS "${LINKER_NEEDS_FLAGS}"
+      CACHE STRING "LDFLAGS for a standard build, library linking" FORCE)
+  set(CMAKE_EXE_LINKER_FLAGS "${LINKER_NEEDS_FLAGS}"
+      CACHE STRING "LDFLAGS for a standard build, final linking" FORCE)
+  set(COMPILER_IS_GNULIKE 1)
+elseif(CMAKE_C_COMPILER_ID STREQUAL Clang)
+  set(DEBUG_SYMBOL_FLAGS "-g3 -fdebug-macro")
+  set(COMPILER_IS_GNULIKE 1)
+elseif(CMAKE_C_COMPILER_ID STREQUAL AppleClang)
+  set(DEBUG_SYMBOL_FLAGS "-gdwarf-2 -g3")
+  set(COMPILER_IS_GNULIKE 1)
+endif()
+
+if(COMPILER_IS_GNULIKE)
+  set(CMAKE_C_FLAGS_DEBUG "-DO_DEBUG -DO_DEBUG_ATOMGC -O0 ${DEBUG_SYMBOL_FLAGS} ${COMPILER_NEEDS_FLAGS}"
       CACHE STRING "CFLAGS for a Debug build" FORCE)
-  set(CMAKE_C_FLAGS_RELWITHDEBINFO "-O2 -gdwarf-2 -g3"
+  set(CMAKE_C_FLAGS_RELWITHDEBINFO "-O2 ${DEBUG_SYMBOL_FLAGS} ${COMPILER_NEEDS_FLAGS}"
       CACHE STRING "CFLAGS for a RelWithDebInfo build" FORCE)
-  set(CMAKE_C_FLAGS_RELEASE "-O2"
+  set(CMAKE_C_FLAGS_RELEASE "-O2 ${COMPILER_NEEDS_FLAGS}"
       CACHE STRING "CFLAGS for a Release build" FORCE)
-  set(CMAKE_C_FLAGS_PGO "-O2 -gdwarf-2 -g3"
+  set(CMAKE_C_FLAGS_PGO "-O2 ${DEBUG_SYMBOL_FLAGS} ${COMPILER_NEEDS_FLAGS}"
       CACHE STRING "CFLAGS for a PGO build" FORCE)
   set(CMAKE_C_FLAGS_SANITIZE
-      "-O0 -gdwarf-2 -g3 -fsanitize=address -fno-omit-frame-pointer"
+      "-O0 ${DEBUG_SYMBOL_FLAGS} ${SANITIZE_FLAGS} ${COMPILER_NEEDS_FLAGS}"
       CACHE STRING "CFLAGS for a Sanitize build" FORCE)
-elseif(CMAKE_C_COMPILER_ID STREQUAL AppleClang)
-  set(CMAKE_C_FLAGS_DEBUG "-DO_DEBUG -gdwarf-2 -g3"
-      CACHE STRING "CFLAGS for a Debug build" FORCE)
 else()
   message("Unknown C compiler.  ${CMAKE_C_COMPILER_ID}")
 endif()

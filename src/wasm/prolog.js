@@ -138,7 +138,7 @@ Prolog.prototype.atom_chars = function(atom) {
     if (ptr === 0) {
         return null;
     } else {
-        return this.module.Pointer_stringify(ptr);
+        return this.module.UTF8ToString(ptr);
     }
 };
 

@@ -1,12 +1,23 @@
 # Make console binaries runnable through Node.js.
 
 set(WASM_NODE_LINK_FLAGS
+    --pre-js ${CMAKE_CURRENT_SOURCE_DIR}/wasm/cli-pre.js
+    -s EXPORTED_FUNCTIONS=_main,_PL_backtrace_string
     -s NODERAWFS=1
     -s EXIT_RUNTIME=1)
+if(MULTI_THREADED)
+    list(APPEND WASM_NODE_LINK_FLAGS
+        -s ENVIRONMENT=node,worker
+        -s PTHREAD_POOL_SIZE=5)
+else()
+    list(APPEND WASM_NODE_LINK_FLAGS
+        -s ENVIRONMENT=node)
+endif()
 join_list(WASM_NODE_LINK_FLAGS_STRING " " ${WASM_NODE_LINK_FLAGS})
 
 set_target_properties(swipl PROPERTIES
-		      LINK_FLAGS "${WASM_NODE_LINK_FLAGS_STRING}")
+		      LINK_FLAGS "${WASM_NODE_LINK_FLAGS_STRING}"
+              LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/wasm/cli-pre.js)
 
 # Create the preload data containing the libraries. Note that
 # alternatively we can put the library in the resource file and
@@ -34,7 +45,7 @@ set(WASM_WEB_LINK_FLAGS
     -s NO_EXIT_RUNTIME=0
     -s EXPORTED_FUNCTIONS=@${CMAKE_SOURCE_DIR}/src/wasm/exports.json
     -s EXPORTED_RUNTIME_METHODS=@${CMAKE_SOURCE_DIR}/src/wasm/runtime_exports.json
-    --preload-file ${CMAKE_CURRENT_BINARY_DIR}/${WASM_PRELOAD_DIR}
+    --preload-file ${CMAKE_CURRENT_BINARY_DIR}/${WASM_PRELOAD_DIR}@${WASM_PRELOAD_DIR}
     --post-js ${CMAKE_SOURCE_DIR}/src/wasm/prolog.js)
 join_list(WASM_WEB_LINK_FLAGS_STRING " " ${WASM_WEB_LINK_FLAGS})
 

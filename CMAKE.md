@@ -179,29 +179,36 @@ perform the process on your host Linux system.
 
 ### WASM (Emscripten)
 
-__Note__: due to a  bug  in   the  current  Emscripten  directory access
-functions we need the _native friend_   mechanism  to create the library
-index. The flags below   include `-DSWIPL_NATIVE_FRIEND=build`, assuming
-you built a  native  executable  in   the  directory  `build`  below the
-sources. Adjust as necessary.
-
-    [Assumes native Prolog in `build`.  See note above]
+SWI-Prolog  supports  building  to  a  WebAssembly  target,   using  the
+Emscripten compatibility layer. Install the Emscripten SDK (here assumed
+installed in ~/emsdk) and use the following commands to build:
 
     mkdir build.wasm
     cd build.wasm
     source ~/emsdk/emsdk_env.sh
-    cmake -DCMAKE_TOOLCHAIN_FILE=$EMSCRIPTEN/cmake/Modules/Platform/Emscripten.cmake \
+    emcmake cmake \
           -DCMAKE_BUILD_TYPE=Release \
-          -DZLIB_LIBRARY=$HOME/zlib-1.2.11/libz.a \
-          -DZLIB_INCLUDE_DIR=$HOME/zlib-1.2.11 \
-          -DMULTI_THREADED=OFF \
-          -DUSE_SIGNALS=OFF \
-          -DUSE_GMP=OFF \
-          -DBUILD_SWIPL_LD=OFF \
-          -DSWIPL_PACKAGES=OFF \
-          -DINSTALL_DOCUMENTATION=OFF \
-          -DSWIPL_NATIVE_FRIEND=build \
           -G Ninja ..
+    ninja
+
+The WebAssembly build is still a work in progress. Things to note:
+
+- The WASM environment  doesn't have  signal support,  so USE_SIGNALS is
+  forced to OFF in Cmake.  This is equivalent to  running swipl with the
+  options `--no-signals --sigalert=0` on the command line.
+- WebAssembly does not  (yet)  have any support  for dynamic loading  of
+  shared libraries.  At present,  this means that USE_PACKAGES is forced
+  to OFF.
+- Multithreading _is_ supported,  and the default  configuration enables
+  it. However, it requires a recent-enough browser or Node.js to run it;
+  for Node.js,  you will need  minimum version 12,  and you  may need to
+  pass  `--experimental-wasm-threads`  on the  command line.  (If you've
+  already sourced the Emscripten environment file as above,  you already
+  have a recent enough Node.js in your path.)
+  
+  All modern browsers other than Android support multithreading;  if you
+  need to run SWI-Prolog under WebAssembly in an [unsupported environment](https://caniuse.com/mdn-javascript_builtins_webassembly_memory_memory_shared),
+  pass the `-DMULTI_THREADED=OFF` option to Cmake as described above.
 
 ### Building a 32-bit version on 64-bit Debian based Linux
 
