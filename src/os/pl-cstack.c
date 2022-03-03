@@ -848,6 +848,165 @@ initBackTrace(void)
 
 
 		 /*******************************
+		 *	    EMSCRIPTEN		*
+		 *******************************/
+
+#if !defined(BTRACE_DONE) && defined(__EMSCRIPTEN__)
+#define BTRACE_DONE 1
+#include <emscripten.h>
+
+typedef struct btrace
+{ char	       *dumps[SAVE_TRACES];
+  const char   *why[SAVE_TRACES];
+//   int		sizes[SAVE_TRACES];
+  int		current;
+  int		shared;
+} btrace;
+
+
+void
+btrace_destroy(struct btrace *bt)
+{ int i;
+
+  for(i=0; i<SAVE_TRACES; i++)
+  { if ( bt->dumps[i] )
+      free(bt->dumps[i]);
+  }
+
+  free(bt);
+}
+
+
+static btrace *
+get_trace_store(int create)
+{ GET_LD
+
+  if ( HAS_LD ? !LD->btrace_store : create )
+  { btrace *s = malloc(sizeof(*s));
+    if ( s )
+    { memset(s, 0, sizeof(*s));
+      if ( HAS_LD )
+      { s->shared = TRUE;
+	LD->btrace_store = s;
+      }
+    }
+
+    return s;
+  } else if ( HAS_LD )
+  { return LD->btrace_store;
+  }
+
+  return NULL;
+}
+
+
+static int
+next_btrace_id(btrace *bt)
+{ int current;
+#ifdef COMPARE_AND_SWAP
+  int next;
+
+  do
+  { current = bt->current;
+    next = current+1;
+    if ( next == SAVE_TRACES )
+      next = 0;
+  } while ( !COMPARE_AND_SWAP(&bt->current, current, next) );
+#else
+  current = bt->current++ % SAVE_TRACES;
+
+  if ( bt->current >= SAVE_TRACES )
+    bt->current %= SAVE_TRACES;
+#endif
+
+  return current;
+}
+
+
+btrace *
+save_backtrace(const char *why)
+{ btrace *bt = get_trace_store(TRUE);
+
+  if ( bt )
+  { char *trace = NULL;
+    int size = 0, maxsize = 0;
+    int current = next_btrace_id(bt);
+
+    for (;;)
+    { size = emscripten_get_callstack(EM_LOG_C_STACK | EM_LOG_FUNC_PARAMS, trace, maxsize);
+      if ( !maxsize )
+      { assert(size > 0);
+	maxsize = size;
+	trace = malloc(maxsize);
+	if ( !trace )
+	  return NULL;
+      } else
+	break;
+    }
+    assert(size > 0 && size == maxsize && trace);
+
+    if ( bt->dumps[current] )
+      free(bt->dumps[current]);
+    bt->dumps[current] = trace;
+    bt->why[current] = why;
+  }
+
+  return bt;
+}
+
+
+static void
+print_trace(btrace *bt, int me)
+{ if ( bt->why[me] )
+  { Sdprintf("C-stack trace labeled \"%s\":\n%s", bt->why[me], bt->dumps[me]);
+  } else
+  { Sdprintf("No stack trace\n");
+  }
+}
+
+
+void
+print_backtrace(int last)		/* 1..SAVE_TRACES */
+{ btrace *bt = get_trace_store(FALSE);
+
+  if ( bt )
+  { int me = bt->current-last;
+    if ( me < 0 )
+      me += SAVE_TRACES;
+
+    print_trace(bt, me);
+  } else
+  { Sdprintf("No backtrace store?\n");
+  }
+}
+
+
+static void
+bstore_print_backtrace_named(btrace *bt, const char *why)
+{ if ( bt )
+  { int me = bt->current-1;
+
+    for(;;)
+    { if ( me < 0 )
+	me += SAVE_TRACES;
+      if ( bt->why[me] && strcmp(bt->why[me], why) == 0 )
+      { print_trace(bt, me);
+	return;
+      }
+      if ( --me == bt->current-1 )
+      { Sdprintf("No backtrace named %s\n", why);
+	break;
+      }
+    }
+  }
+}
+
+
+#endif /*__EMSCRIPTEN__*/
+
+
+
+		 /*******************************
 		 *	     SHARED		*
 		 *******************************/
 
